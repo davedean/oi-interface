@@ -780,6 +780,7 @@ async def test_text_response_delivered_to_device(event_bus, stub_device):
     """
     from unittest.mock import AsyncMock, MagicMock
     from datp.commands import CommandDispatcher
+    from text.delivery import TextDeliveryPipeline
 
     registry = StubRegistry(devices=[stub_device], foreground=stub_device)
     backend = StubPiBackend(response="It's 3:14 PM")
@@ -790,6 +791,9 @@ async def test_text_response_delivered_to_device(event_bus, stub_device):
     mock_dispatcher.show_text_delta = AsyncMock(return_value=True)
 
     service = ChannelService(event_bus, registry, backend, command_dispatcher=mock_dispatcher)
+    
+    # Create TextDeliveryPipeline to handle agent_response_delta events
+    text_pipeline = TextDeliveryPipeline(event_bus, mock_dispatcher)
 
     response_received = None
 

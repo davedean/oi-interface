@@ -110,6 +110,7 @@ class ChannelService:
                 "backend_name": response.backend_name,
                 "session_key": response.session_key,
                 "correlation_id": response.correlation_id,
+                "streaming_used": response.streaming_used,  # Add streaming flag
             },
         )
         logger.info("Channel message processed", extra={**log_context, "elapsed_ms": elapsed_ms})
@@ -168,6 +169,7 @@ class ChannelService:
                 "backend_name": response.backend_name,
                 "session_key": response.session_key,
                 "correlation_id": response.correlation_id,
+                "streaming_used": response.streaming_used,  # Add streaming flag
             },
         )
 
