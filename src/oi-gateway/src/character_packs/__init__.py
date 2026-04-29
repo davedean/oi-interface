@@ -739,6 +739,21 @@ class RenderInstruction:
     overlay_sprite_path: str | None = None
     overlay_label: str | None = None
 
+    def to_datp_command(self, pack_id: str, target: str) -> dict:
+        """Convert render instructions to a DATP command args dict."""
+        return {
+            "op": "character.set_state",
+            "args": {
+                "sprite": self.sprite_path,
+                "label": self.label,
+                "animation": self.animation,
+                "overlay": self.overlay_sprite_path,
+                "overlay_label": self.overlay_label,
+                "pack_id": pack_id,
+                "target": target,
+            },
+        }
+
 
 class DeviceRenderer:
     """Renders character packs to device-specific formats.
@@ -797,8 +812,8 @@ class DeviceRenderer:
         # Get overlay if specified
         overlay_sprite_path = None
         overlay_label = None
-        if overlay and self.pack.overlays:
-            if overlay not in self.pack.overlays:
+        if overlay:
+            if not self.pack.overlays or overlay not in self.pack.overlays:
                 raise ValueError(f"Overlay '{overlay}' not found in pack '{self.pack.pack_id}'")
             overlay_cfg = self.pack.overlays[overlay]
             overlay_sprite_path = overlay_cfg.sprite
@@ -1216,4 +1231,6 @@ __all__ = [
     "PackValidator",
     # Experimental generator
     "PackGenerator",
+    # Device character service
+    "CharacterRendererService",
 ]

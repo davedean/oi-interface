@@ -39,6 +39,8 @@ class CommandDispatcher:
         self._pending: dict[str, asyncio.Future[bool]] = {}
         # Subscribe to inbound acks (callback signature: event_type, device_id, payload)
         server.event_bus.subscribe(self._on_event)
+        # Character renderer — initialized on first use
+        self._character_renderer = None
 
     def _on_event(self, event_type: str, device_id: str, payload: dict[str, Any]) -> None:
         """Callback when any event is received. Filter for acks and resolve pending futures."""
@@ -79,6 +81,13 @@ class CommandDispatcher:
         """
         msg = build_command(device_id, op, args or {})
         command_id = msg["id"]
+
+        # Render character state based on the command (non-blocking)
+        if self._character_renderer is not None:
+            try:
+                await self._character_renderer.render_for_command_async(device_id, op, args or {})
+            except Exception as exc:
+                logger.debug("Character render error (non-critical): %s", exc)
 
         # Create a future to wait for the ack
         loop = asyncio.get_event_loop()
@@ -342,4 +351,47 @@ class CommandDispatcher:
             True if ack'd. Device should transition to MUTED state.
         """
         msg = build_device_mute_until(device_id, until)
+        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+
+    # ------------------------------------------------------------------
+    # Character rendering
+    # ------------------------------------------------------------------
+
+    def set_character_renderer(self, renderer) -> None:
+        """Set the character renderer service.
+
+        Parameters
+        ----------
+        renderer : CharacterRendererService
+            The character renderer instance.
+        """
+        self._character_renderer = renderer
+
+    async def set_character_pack(
+        self,
+        device_id: str,
+        pack_id: str | None,
+        timeout: float = 5.0,
+    ) -> bool:
+        """Set or clear the character pack for a device.
+
+        Parameters
+        ----------
+        device_id : str
+            Target device.
+        pack_id : str or None
+            The character pack ID to assign, or None to clear.
+        timeout : float, optional
+            Ack timeout in seconds.
+
+        Returns
+        -------
+        bool
+            True if the device acknowledged success.
+        """
+        msg = build_command(
+            device_id,
+            "character.set_state",
+            {"pack_id": pack_id} if pack_id is not None else {"pack_id": None},
+        )
         return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)

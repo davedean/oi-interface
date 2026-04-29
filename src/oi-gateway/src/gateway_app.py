@@ -7,8 +7,10 @@ import os
 from dataclasses import dataclass
 
 from api import GatewayAPI
+from api.character_packs import CharacterPackService
 from audio import AudioDeliveryPipeline, StubTtsBackend
 from channel import AgentBackend, ChannelService, create_backend_from_env
+from character_packs import CharacterPackStore, CharacterRendererService
 from datp import EventBus
 from datp.commands import CommandDispatcher
 from datp.server import DATPServer
@@ -52,6 +54,15 @@ class GatewayRuntime:
             dispatcher=self.dispatcher,
             tts=self.tts,
         )
+        # Character pack store and renderer
+        self.pack_store = CharacterPackStore()
+        self.pack_service = CharacterPackService(self.pack_store)
+        self.character_renderer = CharacterRendererService(
+            server=self.server,
+            registry=self.registry,
+            command_dispatcher=self.dispatcher,
+        )
+        self.dispatcher.set_character_renderer(self.character_renderer)
         self.api = GatewayAPI(
             datp_server=self.server,
             command_dispatcher=self.dispatcher,
@@ -59,6 +70,7 @@ class GatewayRuntime:
             host=self.api_host,
             port=self.api_port,
             tts=self.tts,
+            character_pack_service=self.pack_service,
         )
 
     async def start(self) -> None:
