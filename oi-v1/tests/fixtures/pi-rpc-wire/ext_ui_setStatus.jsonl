@@ -1,0 +1,2 @@
+{"comment": "server requests extension UI setStatus, client responds with updated status"}
+{"emit": {"type": "extension_ui_request", "id": "req-4", "method": "setStatus", "statusKey": "my-ext", "statusText": "running"}}

@@ -1,0 +1,2 @@
+{"comment": "server emits queue_update with pending steering and follow-up messages"}
+{"emit": {"type": "queue_update", "steering": ["Focus on error handling"], "followUp": ["After that, summarize"]}}

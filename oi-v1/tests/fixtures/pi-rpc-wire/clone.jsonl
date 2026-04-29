@@ -1,0 +1,3 @@
+{"comment": "client clones current session branch, server acknowledges"}
+{"expect": {"type": "clone", "id": "<echo>"}}
+{"emit": {"type": "response", "command": "clone", "id": "<echo>", "success": true, "data": {"cancelled": false}}}

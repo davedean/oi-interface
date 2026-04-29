@@ -1,0 +1,254 @@
+"""Pi agent backend implementations."""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import os
+from typing import Any
+
+from .backend import AgentBackend, AgentBackendError, AgentRequest, AgentResponse
+from .request_builder import render_text_prompt
+
+logger = logging.getLogger(__name__)
+
+
+class PiBackendError(AgentBackendError):
+    """Backward-compatible alias for Pi backend failures."""
+
+
+class SubprocessPiBackend(AgentBackend):
+    """Send requests to pi via subprocess RPC."""
+
+    def __init__(self, pi_command: list[str] | None = None, timeout_seconds: float | None = None) -> None:
+        self._pi_command = pi_command or ["pi", "--mode", "rpc", "--no-session"]
+        self._timeout_seconds = timeout_seconds if timeout_seconds is not None else self._read_timeout_from_env()
+
+    @property
+    def mode(self) -> str:
+        return "subprocess"
+
+    @property
+    def name(self) -> str:
+        return "pi"
+
+    @property
+    def timeout_seconds(self) -> float:
+        return self._timeout_seconds
+
+    async def send_request(self, request: AgentRequest) -> AgentResponse:
+        message = render_text_prompt(request)
+        response_text = await self.send_prompt(message)
+        return AgentResponse(
+            response_text=response_text,
+            backend_name=self.name,
+            session_key=request.session_key,
+            correlation_id=request.correlation_id,
+        )
+
+    async def send_prompt(self, message: str) -> str:
+        """Backward-compatible helper for tests and legacy callers."""
+        logger.debug(
+            "starting pi subprocess prompt",
+            extra={
+                "backend_mode": self.mode,
+                "pi_command": self._pi_command,
+                "timeout_seconds": self._timeout_seconds,
+                "message_len": len(message),
+            },
+        )
+        proc = await asyncio.create_subprocess_exec(
+            *self._pi_command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        prompt_line = json.dumps({"type": "prompt", "message": message}) + "\n"
+        proc.stdin.write(prompt_line.encode())
+        await proc.stdin.drain()
+
+        terminal_event_types = {"agent_end", "end", "completed", "response_end"}
+        last_text: str | None = None
+        responded = False
+
+        try:
+            while True:
+                raw = await asyncio.wait_for(proc.stdout.readline(), timeout=self._timeout_seconds)
+                if not raw:
+                    if last_text and last_text.strip():
+                        return last_text
+                    raise PiBackendError("pi closed stdout without usable response text")
+
+                line = raw.decode(errors="replace").strip()
+                if not line:
+                    continue
+
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise PiBackendError(f"malformed JSON from pi stdout: {line}") from exc
+
+                if not isinstance(event, dict):
+                    logger.debug("Ignoring non-object pi event: %r", event)
+                    continue
+
+                event_type = event.get("type")
+                extracted = self._extract_text(event)
+                if extracted and extracted.strip():
+                    last_text = extracted
+
+                if event_type in terminal_event_types:
+                    event_text = self._extract_text(event)
+                    if event_text and event_text.strip() and not responded:
+                        responded = True
+                        return event_text
+                    if last_text and last_text.strip() and not responded:
+                        responded = True
+                        return last_text
+                    continue
+
+                logger.debug("Ignoring non-terminal pi event type=%r", event_type)
+        except asyncio.TimeoutError as exc:
+            raise PiBackendError(
+                f"pi subprocess timed out waiting for response after {self._timeout_seconds:.1f}s"
+            ) from exc
+        finally:
+            with contextlib.suppress(Exception):
+                if proc.stdin and not proc.stdin.is_closing():
+                    proc.stdin.close()
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+
+    def _extract_text(self, event: dict[str, Any]) -> str | None:
+        event_type = event.get("type")
+
+        if event_type == "agent_end":
+            messages = event.get("messages")
+            if isinstance(messages, list):
+                for msg in reversed(messages):
+                    text = self._extract_message_text(msg)
+                    if text:
+                        return text
+            return None
+
+        if event_type == "message_end":
+            text = self._extract_message_text(event.get("message"))
+            if text:
+                return text
+            return None
+
+        assistant_event = event.get("assistantMessageEvent")
+        if isinstance(assistant_event, dict):
+            assistant_event_type = assistant_event.get("type")
+            if assistant_event_type in {"text_delta", "text_end", "text_start"}:
+                for key in ("content", "delta"):
+                    val = assistant_event.get(key)
+                    if isinstance(val, str) and val.strip():
+                        return val
+                partial = assistant_event.get("partial")
+                text = self._extract_message_text(partial)
+                if text:
+                    return text
+            return None
+
+        for key in ("text", "response", "content"):
+            val = event.get(key)
+            if isinstance(val, str) and val.strip():
+                return val
+        return None
+
+    def _extract_message_text(self, message: Any) -> str | None:
+        if not isinstance(message, dict):
+            return None
+        role = message.get("role")
+        if role is not None and role != "assistant":
+            return None
+
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            chunks: list[str] = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                part_type = part.get("type")
+                if part_type not in (None, "text"):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str) and text:
+                    chunks.append(text)
+            if chunks:
+                return "".join(chunks)
+        return None
+
+    @staticmethod
+    def _read_timeout_from_env() -> float:
+        raw = os.getenv("OI_GATEWAY_PI_TIMEOUT_SECONDS", "60")
+        try:
+            timeout = float(raw)
+        except ValueError:
+            logger.warning(
+                "invalid OI_GATEWAY_PI_TIMEOUT_SECONDS value; using default",
+                extra={"backend_mode": "subprocess", "raw_timeout": raw, "default_timeout": 60.0},
+            )
+            return 60.0
+
+        if timeout <= 0:
+            logger.warning(
+                "non-positive OI_GATEWAY_PI_TIMEOUT_SECONDS value; using default",
+                extra={"backend_mode": "subprocess", "raw_timeout": raw, "default_timeout": 60.0},
+            )
+            return 60.0
+
+        return timeout
+
+
+class StubPiBackend(AgentBackend):
+    """Return a fixed response without spawning a subprocess."""
+
+    mode = "stub"
+
+    def __init__(self, response: str = "stub agent response") -> None:
+        self._response = response
+        self._last_message: str | None = None
+        self._last_request: AgentRequest | None = None
+        self._call_count = 0
+
+    @property
+    def name(self) -> str:
+        return "pi"
+
+    async def send_request(self, request: AgentRequest) -> AgentResponse:
+        self._last_request = request
+        self._last_message = render_text_prompt(request)
+        self._call_count += 1
+        return AgentResponse(
+            response_text=self._response,
+            backend_name=self.name,
+            session_key=request.session_key,
+            correlation_id=request.correlation_id,
+        )
+
+    async def send_prompt(self, message: str) -> str:
+        """Backward-compatible helper for existing tests."""
+        self._last_message = message
+        self._call_count += 1
+        return self._response
+
+    @property
+    def last_message(self) -> str | None:
+        return self._last_message
+
+    @property
+    def last_request(self) -> AgentRequest | None:
+        return self._last_request
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count

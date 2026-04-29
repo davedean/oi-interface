@@ -1,0 +1,3 @@
+{"comment": "client requests session stats, server responds with token and cost statistics"}
+{"expect": {"type": "get_session_stats", "id": "<echo>"}}
+{"emit": {"type": "response", "command": "get_session_stats", "id": "<echo>", "success": true, "data": {"sessionFile": "/tmp/session.jsonl", "sessionId": "abc123", "userMessages": 3, "assistantMessages": 3, "toolCalls": 5, "toolResults": 5, "totalMessages": 16, "tokens": {"input": 12000, "output": 3000, "cacheRead": 8000, "cacheWrite": 2000, "total": 25000}, "cost": 0.12, "contextUsage": {"tokens": 15000, "contextWindow": 200000, "percent": 8}}}}

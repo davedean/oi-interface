@@ -1,0 +1,93 @@
+{
+  "devices": {
+    "stick-pocket": {
+      "id": "stick-pocket",
+      "type": "voice_terminal",
+      "name": "Pocket Stick",
+      "online": true,
+      "foreground_score": 0.82,
+      "capabilities": {
+        "input": [
+          "hold_to_record",
+          "button_confirm",
+          "button_cancel"
+        ],
+        "output": [
+          "tiny_screen",
+          "cached_audio",
+          "status_character"
+        ],
+        "sensors": [
+          "battery",
+          "wifi_rssi",
+          "imu"
+        ]
+      },
+      "constraints": {
+        "max_text_chars": 48,
+        "audio_playback": "cached",
+        "audio_streaming": false,
+        "screen_width": 135,
+        "screen_height": 240,
+        "battery_sensitive": true
+      },
+      "attention": {
+        "can_interrupt": false,
+        "can_request_attention": true,
+        "preferred_for": [
+          "quick_voice",
+          "status",
+          "approval"
+        ],
+        "never_for": [
+          "long_text",
+          "secret_display"
+        ]
+      },
+      "state": {
+        "mode": "RESPONSE_CACHED",
+        "battery_percent": 64,
+        "wifi_rssi": -68,
+        "muted_until": null
+      },
+      "theme": {
+        "character_pack": "synth-goblin-v1"
+      }
+    },
+    "desktop-main": {
+      "id": "desktop-main",
+      "type": "desktop_client",
+      "name": "Main Desktop",
+      "online": true,
+      "foreground_score": 0.55,
+      "capabilities": {
+        "input": [
+          "keyboard",
+          "mouse",
+          "approval_ui"
+        ],
+        "output": [
+          "large_screen",
+          "notification",
+          "full_diff"
+        ]
+      },
+      "constraints": {
+        "max_text_chars": 20000,
+        "audio_playback": "optional"
+      },
+      "attention": {
+        "can_interrupt": true,
+        "preferred_for": [
+          "long_text",
+          "diff_review",
+          "dashboard",
+          "approval_detail"
+        ]
+      },
+      "state": {
+        "mode": "AVAILABLE"
+      }
+    }
+  }
+}

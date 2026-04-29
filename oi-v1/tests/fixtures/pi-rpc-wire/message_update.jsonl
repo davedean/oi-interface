@@ -1,0 +1,2 @@
+{"comment": "server emits message_update with assistant text delta"}
+{"emit": {"type": "message_update", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "Hello world", "partial": {}}}}

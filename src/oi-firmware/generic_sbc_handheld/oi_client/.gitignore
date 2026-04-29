@@ -1,0 +1,3 @@
+# Vendored dependencies — must be installed per-arch
+oi_client/lib/
+oi_client/lib/__pycache__/

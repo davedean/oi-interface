@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Device-local secrets; keep credentials out of git.
+firmware/secrets.py
+
+# Local runtime state if a developer points OI_STATE_DIR into the repo.
+oi-state/
+
+# Node/TypeScript local artifacts.
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+coverage/

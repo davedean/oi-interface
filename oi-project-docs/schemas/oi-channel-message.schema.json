@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Oi Channel Message",
+  "type": "object",
+  "required": [
+    "channel_id",
+    "message_id",
+    "input",
+    "reply_constraints"
+  ],
+  "properties": {
+    "channel_id": {
+      "type": "string"
+    },
+    "message_id": {
+      "type": "string"
+    },
+    "user": {
+      "type": "object"
+    },
+    "source_device": {
+      "type": "object"
+    },
+    "interaction": {
+      "type": "object"
+    },
+    "input": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "text",
+            "audio_ref"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "audio_ref": {
+          "type": "string"
+        }
+      }
+    },
+    "reply_constraints": {
+      "type": "object",
+      "properties": {
+        "max_spoken_seconds": {
+          "type": "number"
+        },
+        "supports_buttons": {
+          "type": "boolean"
+        },
+        "supports_long_form": {
+          "type": "boolean"
+        },
+        "private_audio": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,3 @@
+{"comment": "server requests extension UI editor, client responds with edited content"}
+{"emit": {"type": "extension_ui_request", "id": "req-1", "method": "editor", "title": "Edit some text", "prefill": "Line 1\nLine 2\nLine 3"}}
+{"expect": {"type": "extension_ui_response", "id": "req-1", "value": "Edited Line 1\nEdited Line 2\nLine 3"}}

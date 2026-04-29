@@ -1,0 +1,7 @@
+{"comment": "client requests bash execution, server runs and returns output"}
+{"expect": {"type": "bash", "id": "<echo>", "command": "pwd"}}
+{"emit": {"type": "response", "command": "bash", "id": "<echo>", "success": true, "data": {"output": "/workspace", "exitCode": 0, "cancelled": false, "truncated": false}}}
+{"emit": {"type": "agent_start"}}
+{"emit": {"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {"command": "pwd"}}}
+{"emit": {"type": "tool_execution_end", "toolCallId": "t1", "toolName": "bash", "result": {"content": [{"type": "text", "text": "/workspace"}]}, "isError": false}}
+{"emit": {"type": "agent_end", "messages": []}}

@@ -1,0 +1,3 @@
+{"comment": "client switches to a specific model, server responds with the new model object"}
+{"expect": {"type": "set_model", "id": "<echo>", "provider": "anthropic", "modelId": "claude-sonnet-4-20250514"}}
+{"emit": {"type": "response", "command": "set_model", "id": "<echo>", "success": true, "data": {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4", "api": "anthropic-messages", "provider": "anthropic", "baseUrl": "https://api.anthropic.com", "reasoning": true, "input": ["text", "image"], "contextWindow": 200000, "maxTokens": 16384, "cost": {"input": 3.0, "output": 15.0, "cacheRead": 0.3, "cacheWrite": 3.75}}}}

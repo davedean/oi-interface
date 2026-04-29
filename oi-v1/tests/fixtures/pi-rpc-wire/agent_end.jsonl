@@ -1,0 +1,2 @@
+{"comment": "server emits agent_end event with empty messages"}
+{"emit": {"type": "agent_end", "messages": []}}

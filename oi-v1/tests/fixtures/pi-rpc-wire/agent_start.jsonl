@@ -1,0 +1,2 @@
+{"comment": "server emits agent_start event (no client input expected)"}
+{"emit": {"type": "agent_start"}}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DATP Command",
+  "type": "object",
+  "required": [
+    "v",
+    "type",
+    "id",
+    "device_id",
+    "payload"
+  ],
+  "properties": {
+    "v": {
+      "const": "datp/0.1"
+    },
+    "type": {
+      "const": "command"
+    },
+    "id": {
+      "type": "string"
+    },
+    "device_id": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "op",
+        "args"
+      ],
+      "properties": {
+        "op": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

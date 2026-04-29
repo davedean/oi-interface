@@ -1,0 +1,2 @@
+{"comment": "server emits auto_retry_start event"}
+{"emit": {"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3}}

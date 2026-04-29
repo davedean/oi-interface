@@ -1,0 +1,2 @@
+{"comment": "server sends extension UI notify, no response expected"}
+{"emit": {"type": "extension_ui_request", "id": "req-3", "method": "notify", "message": "Task completed"}}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Stick Device",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "capabilities",
+    "state"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "online": {
+      "type": "boolean"
+    },
+    "capabilities": {
+      "type": "object"
+    },
+    "constraints": {
+      "type": "object"
+    },
+    "attention": {
+      "type": "object"
+    },
+    "state": {
+      "type": "object"
+    },
+    "theme": {
+      "type": "object"
+    }
+  }
+}

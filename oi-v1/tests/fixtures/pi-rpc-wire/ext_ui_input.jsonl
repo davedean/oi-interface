@@ -1,0 +1,3 @@
+{"comment": "server requests extension UI input, client responds with typed text"}
+{"emit": {"type": "extension_ui_request", "id": "req-1", "method": "input", "title": "Enter a value", "placeholder": "type something..."}}
+{"expect": {"type": "extension_ui_response", "id": "req-1", "value": "hello world"}}

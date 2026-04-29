@@ -1,0 +1,3 @@
+{"comment": "client sends follow-up message for after agent finishes, server acknowledges"}
+{"expect": {"type": "follow_up", "id": "<echo>", "message": "After you're done, also summarize the changes"}}
+{"emit": {"type": "response", "command": "follow_up", "id": "<echo>", "success": true}}

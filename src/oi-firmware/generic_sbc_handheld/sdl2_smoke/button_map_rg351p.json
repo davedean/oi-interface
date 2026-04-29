@@ -1,0 +1,25 @@
+{
+  "device": "RG351P",
+  "os": "AmberELEC",
+  "sdl_version_detected": "2.26.2",
+  "mapping": {
+    "a":      {"type": "button", "value": 0},
+    "b":      {"type": "button", "value": 1},
+    "x":      {"type": "button", "value": 2},
+    "y":      {"type": "button", "value": 3},
+    "l1":     {"type": "button", "value": 4},
+    "r1":     {"type": "button", "value": 5},
+    "start":  {"type": "button", "value": 6},
+    "select": {"type": "button", "value": 7},
+    "up":     {"type": "hat", "hat": 0, "value": 1},
+    "down":   {"type": "hat", "hat": 0, "value": 4},
+    "left":   {"type": "hat", "hat": 0, "value": 8},
+    "right":  {"type": "hat", "hat": 0, "value": 2}
+  },
+  "notes": {
+    "face_buttons": "Xbox-style ABXY (A=right, B=bottom, X=top, Y=left)",
+    "dpad": "Always hat, never buttons",
+    "unmapped": "L2/R2 triggers, L3/R3 sticks not tested yet",
+    "source": "sdl2_button_map.py wizard on 2026-04-29"
+  }
+}

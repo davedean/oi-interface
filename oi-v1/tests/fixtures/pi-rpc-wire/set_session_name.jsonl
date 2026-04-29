@@ -1,0 +1,3 @@
+{"comment": "client sets session display name, server acknowledges"}
+{"expect": {"type": "set_session_name", "id": "<echo>", "name": "my-feature-work"}}
+{"emit": {"type": "response", "command": "set_session_name", "id": "<echo>", "success": true}}
