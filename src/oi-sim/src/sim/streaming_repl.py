@@ -35,34 +35,27 @@ class StreamingOiSimREPL(OiSimREPL):
         while self.running and self.sim:
             await asyncio.sleep(0.1)
             
-            # Check for agent_response_delta events (streaming text chunks)
-            messages = self.sim.received_messages
-            for msg in messages:
-                if msg.get("type") == "event":
-                    payload = msg.get("payload", {})
-                    event = payload.get("event", "")
-                    
-                    # Display agent text deltas in real-time
-                    if event == "agent_response_delta":
-                        text_delta = payload.get("text_delta", "")
-                        is_final = payload.get("is_final", False)
-                        
-                        if text_delta:
-                            self.current_response_text += text_delta
-                            # Print inline without newline for streaming effect
-                            print(text_delta, end="", flush=True)
-                        
-                        if is_final:
-                            print()  # Newline after final chunk
-                            self.current_response_text = ""
-            
             # Print each new command exactly once.
+            # NOTE: Gateway streams text via command: display.show_text_delta
+            # (not via DATP event agent_response_delta to devices).
             commands = self.sim.received_commands
             if len(commands) > self._printed_command_count:
                 new_commands = commands[self._printed_command_count:]
                 for cmd in new_commands:
                     op = cmd.get("op", "unknown")
                     args = cmd.get("args", {})
+
+                    if op == "display.show_text_delta":
+                        text_delta = args.get("text_delta", "")
+                        is_final = args.get("is_final", False)
+                        if text_delta:
+                            self.current_response_text += text_delta
+                            print(text_delta, end="", flush=True)
+                        if is_final:
+                            print()
+                            self.current_response_text = ""
+                        continue
+
                     print(f"\n📥 {op}")
                     if op == "display.show_card":
                         title = args.get("title", "")

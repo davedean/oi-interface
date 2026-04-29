@@ -48,22 +48,14 @@ class FakeSim:
         pass
 
     async def send_text_prompt(self, text):
-        # Simulate agent response with streaming delta events
-        self.received_messages.append({
-            "type": "event",
-            "payload": {
-                "event": "agent_response_delta",
-                "text_delta": "Hello",
-                "is_final": False,
-            },
+        # Simulate gateway streaming text via display.show_text_delta commands
+        self.received_commands.append({
+            "op": "display.show_text_delta",
+            "args": {"text_delta": "Hello", "is_final": False, "sequence": 0},
         })
-        self.received_messages.append({
-            "type": "event",
-            "payload": {
-                "event": "agent_response_delta",
-                "text_delta": " world!",
-                "is_final": True,
-            },
+        self.received_commands.append({
+            "op": "display.show_text_delta",
+            "args": {"text_delta": " world!", "is_final": True, "sequence": 1},
         })
 
     async def send_battery_update(self, percent):
@@ -116,15 +108,15 @@ class TestStreamingRepl:
         import asyncio
         asyncio.run(repl._cmd_text(["hello", "there"]))
         
-        # Verify messages were generated
-        delta_events = [
-            msg for msg in fake_sim.received_messages
-            if msg.get("type") == "event" and msg.get("payload", {}).get("event") == "agent_response_delta"
+        # Verify commands were generated
+        deltas = [
+            cmd for cmd in fake_sim.received_commands
+            if cmd.get("op") == "display.show_text_delta"
         ]
-        assert len(delta_events) == 2
-        assert delta_events[0]["payload"]["text_delta"] == "Hello"
-        assert delta_events[1]["payload"]["text_delta"] == " world!"
-        assert delta_events[1]["payload"]["is_final"] is True
+        assert len(deltas) == 2
+        assert deltas[0]["args"]["text_delta"] == "Hello"
+        assert deltas[1]["args"]["text_delta"] == " world!"
+        assert deltas[1]["args"]["is_final"] is True
 
     def test_response_text_accumulation(self, repl, fake_sim):
         """Test that streaming chunks accumulate correctly."""
