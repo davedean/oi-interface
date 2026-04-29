@@ -73,13 +73,14 @@ class SubprocessPiBackend(AgentBackend):
         last_text: str | None = None
         responded = False
         response_text = ""
+        sent_text = ""  # Track what we've already sent
 
         try:
             while True:
                 raw = await asyncio.wait_for(proc.stdout.readline(), timeout=self._timeout_seconds)
                 if not raw:
-                    if last_text and last_text.strip():
-                        response_text = last_text
+                    if sent_text and sent_text.strip():
+                        response_text = sent_text
                     break
 
                 line = raw.decode(errors="replace").strip()
@@ -98,14 +99,22 @@ class SubprocessPiBackend(AgentBackend):
                 event_type = event.get("type")
                 extracted = self._extract_text(event)
                 if extracted and extracted.strip():
-                    last_text = extracted
-                    response_text = extracted
-                    is_final = event_type in terminal_event_types
-                    yield AgentStreamChunk(
-                        text_delta=extracted,
-                        is_final=is_final,
-                        metadata={"event_type": event_type} if event_type else {},
-                    )
+                    # Only yield the DELTA (new text), not the full text
+                    if extracted.startswith(sent_text):
+                        delta = extracted[len(sent_text):]
+                    else:
+                        # Text doesn't match up, send full new text
+                        delta = extracted
+                    
+                    if delta:
+                        sent_text = extracted
+                        response_text = extracted
+                        is_final = event_type in terminal_event_types
+                        yield AgentStreamChunk(
+                            text_delta=delta,
+                            is_final=is_final,
+                            metadata={"event_type": event_type} if event_type else {},
+                        )
 
                 if event_type in terminal_event_types:
                     event_text = self._extract_text(event)
