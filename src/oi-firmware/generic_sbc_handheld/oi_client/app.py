@@ -67,6 +67,7 @@ class HandheldApp:
         # Card display
         self._card = CardData(title="Oi", body="Welcome")
         self._card_scroll = 0
+        self._progress_scroll = 0
 
         # Canned prompt selection
         self._prompt_idx = 0
@@ -320,7 +321,8 @@ class HandheldApp:
             elif ev.name == "up":
                 self._card_scroll = max(0, self._card_scroll - 20)
             elif ev.name == "down":
-                self._card_scroll += 20
+                max_scroll = self._max_card_scroll(self._card.title, self._card.body)
+                self._card_scroll = min(max_scroll, self._card_scroll + 20)
 
         elif self._ui_mode == UIMode.WAITING:
             if ev.name == "b":
@@ -393,6 +395,7 @@ class HandheldApp:
                     self._card.title = "Working"
                     body = self._card.body or ""
                     self._card.body = (body + ("\n" if body else "") + f"• {text}")[-1200:]
+                    self._progress_scroll = self._max_card_scroll("Waiting", self._card.body)
 
         elif op == "display.show_response_delta":
             text_delta = args.get("text_delta", "")
@@ -401,6 +404,7 @@ class HandheldApp:
                 if self._ui_mode != UIMode.CARD or self._card.title != "Response":
                     self._card.title = "Response"
                     self._card.body = ""
+                    self._card_scroll = 0
                 self._card.body = (self._card.body or "") + text_delta
             if is_final:
                 self._card_scroll = 0
@@ -485,14 +489,15 @@ class HandheldApp:
             self.renderer.draw_card("Home", lines, 0)
 
         elif self._ui_mode == UIMode.WAITING:
-            # While waiting, show live status/partial text if gateway provides it
-            # via display.show_status(label=...). Fallback to default waiting text.
+            # While waiting, show live progress and keep newest entries on screen.
             waiting_lines = ["Sending to gateway..."]
             if self._card.body:
                 body_lines = [ln for ln in self._card.body.split("\n") if ln.strip()]
                 if body_lines:
                     waiting_lines = body_lines
-            self.renderer.draw_card("Waiting", waiting_lines, 0)
+            progress_body = "\n".join(waiting_lines)
+            self._progress_scroll = self._max_card_scroll("Waiting", progress_body)
+            self.renderer.draw_card("Waiting", waiting_lines, self._progress_scroll)
             self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
 
         elif self._ui_mode == UIMode.CARD:
@@ -584,6 +589,24 @@ class HandheldApp:
 
     def width_center(self, text_width: int) -> int:
         return (480 - text_width) // 2
+
+    def _max_card_scroll(self, title: str, body_text: str) -> int:
+        """Compute max vertical scroll for current card content."""
+        body_lines = body_text.split("\n") if body_text else []
+        card_w = self.renderer.width - 20
+        card_h = self.renderer.height - 90
+        visible_h = max(0, card_h - 46)  # matches renderer body viewport
+
+        total_lines = 0
+        for line in body_lines:
+            if not line.strip():
+                total_lines += 1
+                continue
+            wrapped = self.renderer._wrap_text(line, self.renderer._font_body, card_w - 20)
+            total_lines += max(1, len(wrapped))
+
+        content_h = total_lines * 18
+        return max(0, content_h - visible_h)
 
     # ------------------------------------------------------------------
     # Recording control
