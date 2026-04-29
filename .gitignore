@@ -99,3 +99,6 @@ src/oi-sim/OI-SIM-CLI-PLAN.md
 src/oi-sim/OI-SIM-REPL-PLAN.md
 src/oi-sim/TEXT-INPUT-FEATURE-PLAN.md
 src/oi-sim/progress.md
+
+# deploy scripts
+deploy_*.sh
