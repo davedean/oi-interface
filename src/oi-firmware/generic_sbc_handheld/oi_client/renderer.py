@@ -171,6 +171,7 @@ class Sdl2Renderer:
             self._destroy_tex(tex)
 
     def draw_card(self, title: str, body_lines: list[str], scroll_y: int = 0, card_y: int = 62) -> None:
+        card_x, card_y = 10, card_y
         card_w = self.width - 20
         card_h = self.height - 90
         self._rect(card_x, card_y, card_w, card_h, RenderColors.card_bg)
