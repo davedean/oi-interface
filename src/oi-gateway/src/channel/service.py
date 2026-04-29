@@ -251,8 +251,10 @@ class ChannelService:
         # First try streaming if available, otherwise fall back to non-streaming
         streaming_method = getattr(self._pi_backend, "send_request_streaming", None)
         if callable(streaming_method):
+            logger.info("Using STREAMING path for device %s", request.source_device_id)
             return await self._handle_streaming_request(request, streaming_method)
 
+        logger.info("Using NON-STREAMING path for device %s", request.source_device_id)
         send_request = getattr(self._pi_backend, "send_request", None)
         if callable(send_request):
             return await send_request(request)

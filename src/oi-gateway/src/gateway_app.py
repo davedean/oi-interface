@@ -59,6 +59,7 @@ class GatewayRuntime:
             event_bus=self.event_bus,
             dispatcher=self.dispatcher,
         )
+        logger.info("TextDeliveryPipeline initialized")
         # Character pack store and renderer
         self.pack_store = CharacterPackStore()
         self.pack_service = CharacterPackService(self.pack_store)

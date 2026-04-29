@@ -42,7 +42,7 @@ class TextDeliveryPipeline:
         self._lock_creation_lock = asyncio.Lock()
 
         event_bus.subscribe(self._on_event)
-        logger.info("TextDeliveryPipeline started")
+        logger.info("TextDeliveryPipeline STARTED and subscribed to events")
 
     def _on_event(self, event_type: str, device_id: str, payload: dict[str, Any]) -> None:
         """Handle incoming DATP events."""
@@ -99,6 +99,8 @@ class TextDeliveryPipeline:
         self._sequence_counters[device_id] += 1
 
         # Send delta to device
+        logger.info("TextDeliveryPipeline SENDING delta: device=%s seq=%d final=%s text=%r",
+                    device_id, seq, is_final, text_delta[:50])
         ok = await self._dispatcher.show_text_delta(
             device_id, text_delta, is_final, seq
         )
