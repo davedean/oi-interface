@@ -207,7 +207,10 @@ class Sdl2Renderer:
         """Wrap a line of text to fit within max_width pixels."""
         if not text or not text.strip():
             return [text] if text else []
-        words = text.split(" ")
+        # split() collapses repeated whitespace; split(" ") can create empty
+        # "words" that lead to unstable wrapping/vertical spacing when lines
+        # intentionally include padding (e.g. menu markers).
+        words = text.split()
         lines = []
         current_line = []
         
