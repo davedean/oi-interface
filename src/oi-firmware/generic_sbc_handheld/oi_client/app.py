@@ -364,6 +364,9 @@ class HandheldApp:
         # Clear previous response before sending new prompt
         self._card = CardData(title="Oi", body="")
         self._ui_mode = UIMode.WAITING
+        # Optimistic local character update so UI reflects waiting immediately.
+        self._character_label = "Waiting"
+        self._character_animation = "pulse"
         await self.datp.send_text_prompt(text)
 
     # ------------------------------------------------------------------
