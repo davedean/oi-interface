@@ -290,7 +290,7 @@ ws.connect("ws://gateway.local:8787/datp")
 
 ### 4.1 Display (ST7789)
 
-From v1: `st7789py.py` already works. Copy from `oi-v1/firmware/lib/st7789py.py`.
+From legacy firmware: `st7789py.py` already works. Copy from `src/oi-firmware/m5stack_stickS3/lib/st7789py.py`.
 
 **GPIO mapping:**
 - MOSI: G39
@@ -916,8 +916,8 @@ After initial implementation:
 ## 12. References
 
 - DATP spec: `oi-project-docs/docs/specs/datp-wire-protocol.md`
-- Hardware ref: `oi-v1/HARDWARE.md`
-- v1 firmware: `oi-v1/firmware/` (for display/audio drivers)
+- Hardware ref: `src/oi-firmware/m5stack_stickS3/HARDWARE.md`
+- Legacy firmware: `src/oi-firmware/m5stack_stickS3/lib/` (for display/audio drivers)
 - oi-gateway: `src/oi-gateway/` (DATP server implementation)
 - oi-sim: `src/oi-sim/` (virtual DATP device for testing)
 
@@ -928,7 +928,7 @@ After initial implementation:
 To implement this firmware:
 
 1. **Read the DATP spec** — `oi-project-docs/docs/specs/datp-wire-protocol.md`
-2. **Copy hardware drivers** — Copy `st7789py.py`, `vga2_*.py`, `m5pm1.py` from `oi-v1/firmware/lib/`
+2. **Copy hardware drivers** — Copy `st7789py.py`, `vga2_*.py`, `m5pm1.py` from `src/oi-firmware/m5stack_stickS3/lib/`
 3. **Implement DATP client** — Start with `datp/client.py` WebSocket connection
 4. **Test with gateway** — Run `oi-gateway` and connect device
 5. **Implement events** — Button, audio, state events

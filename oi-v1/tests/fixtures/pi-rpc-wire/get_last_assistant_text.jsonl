@@ -1,3 +1,0 @@
-{"comment": "client requests last assistant text, server responds with text content"}
-{"expect": {"type": "get_last_assistant_text", "id": "<echo>"}}
-{"emit": {"type": "response", "command": "get_last_assistant_text", "id": "<echo>", "success": true, "data": {"text": "The assistant's last response text."}}}

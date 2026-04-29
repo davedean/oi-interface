@@ -1,3 +1,0 @@
-{"comment": "client sends steering message to redirect agent, server acknowledges"}
-{"expect": {"type": "steer", "id": "<echo>", "message": "Stop and focus on error handling instead"}}
-{"emit": {"type": "response", "command": "steer", "id": "<echo>", "success": true}}

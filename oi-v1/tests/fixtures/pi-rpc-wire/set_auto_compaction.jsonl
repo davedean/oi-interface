@@ -1,3 +1,0 @@
-{"comment": "client enables auto compaction, server acknowledges"}
-{"expect": {"type": "set_auto_compaction", "id": "<echo>", "enabled": true}}
-{"emit": {"type": "response", "command": "set_auto_compaction", "id": "<echo>", "success": true}}

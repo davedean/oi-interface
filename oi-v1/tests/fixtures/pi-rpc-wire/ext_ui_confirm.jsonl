@@ -1,3 +1,0 @@
-{"comment": "server requests extension UI confirm, client responds"}
-{"emit": {"type": "extension_ui_request", "id": "req-2", "method": "confirm", "title": "Are you sure?", "message": "This action cannot be undone."}}
-{"expect": {"type": "extension_ui_response", "id": "req-2", "confirmed": true}}

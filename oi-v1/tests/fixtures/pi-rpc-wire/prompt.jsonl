@@ -1,6 +1,0 @@
-{"comment": "client sends prompt with message, server responds and emits conversation events"}
-{"expect": {"type": "prompt", "id": "<echo>", "message": "hello"}}
-{"emit": {"type": "response", "command": "prompt", "id": "<echo>", "success": true}}
-{"emit": {"type": "agent_start"}}
-{"emit": {"type": "message_update", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "Hi there!", "partial": {}}}}
-{"emit": {"type": "agent_end", "messages": []}}

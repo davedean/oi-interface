@@ -1,8 +1,0 @@
-{"type":"snapshot","data":{"sessions":{"active_session_id":"s1","list":[{"session_id":"s1","name":"alpha","status":"idle","pending_count":0,"stale":false,"last_seen_age_s":1},{"session_id":"s2","name":"beta","status":"running","pending_count":0,"stale":false,"last_seen_age_s":2}]},"prompts":[],"queued_commands":[]}}
-{"type":"expect","data":{"view":"idle","sessions":{"active_session_id":"s1"}}}
-{"type":"action","name":"session.cycle","data":{"direction":"next"}}
-{"type":"expect","data":{"view":"idle","sessions":{"active_session_id":"s2"},"last_action_result":{"ok":true,"code":"session_cycled"}}}
-{"type":"action","name":"session.cycle","data":{"direction":"prev"}}
-{"type":"expect","data":{"sessions":{"active_session_id":"s1"}}}
-{"type":"action","name":"session.focus","data":{"session_id":"s2"}}
-{"type":"expect","data":{"view":"idle","sessions":{"active_session_id":"s2"},"last_action_result":{"ok":true,"code":"session_focused"}}}

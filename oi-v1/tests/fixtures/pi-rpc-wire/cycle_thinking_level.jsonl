@@ -1,3 +1,0 @@
-{"comment": "client cycles thinking level, server responds with new level"}
-{"expect": {"type": "cycle_thinking_level", "id": "<echo>"}}
-{"emit": {"type": "response", "command": "cycle_thinking_level", "id": "<echo>", "success": true, "data": {"level": "high"}}}

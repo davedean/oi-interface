@@ -1,3 +1,0 @@
-{"comment": "client cycles to next model, server responds with the cycled model"}
-{"expect": {"type": "cycle_model", "id": "<echo>"}}
-{"emit": {"type": "response", "command": "cycle_model", "id": "<echo>", "success": true, "data": {"model": {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4", "api": "anthropic-messages", "provider": "anthropic", "reasoning": true}, "thinkingLevel": "medium", "isScoped": false}}}

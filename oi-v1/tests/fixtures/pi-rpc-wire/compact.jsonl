@@ -1,3 +1,0 @@
-{"comment": "client triggers manual compaction, server responds with summary"}
-{"expect": {"type": "compact", "id": "<echo>"}}
-{"emit": {"type": "response", "command": "compact", "id": "<echo>", "success": true, "data": {"summary": "Conversation about implementing a new feature with error handling.", "firstKeptEntryId": "entry-5", "tokensBefore": 150000, "details": {}}}}

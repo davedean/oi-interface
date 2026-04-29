@@ -1,3 +1,0 @@
-{"comment": "client requests forkable messages, server responds with available user messages"}
-{"expect": {"type": "get_fork_messages", "id": "<echo>"}}
-{"emit": {"type": "response", "command": "get_fork_messages", "id": "<echo>", "success": true, "data": {"messages": [{"entryId": "entry-1", "text": "What is 2+2?"}, {"entryId": "entry-3", "text": "Now explain quantum computing"}]}}}

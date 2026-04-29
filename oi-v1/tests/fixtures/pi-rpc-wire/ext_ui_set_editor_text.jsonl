@@ -1,2 +1,0 @@
-{"comment": "server sends extension UI set_editor_text, no response expected"}
-{"emit": {"type": "extension_ui_request", "id": "req-1", "method": "set_editor_text", "text": "prefilled text for the user"}}

@@ -66,7 +66,6 @@ src/                 ← v2 implementation
   oi-dashboard/      ← monitoring and debug dashboard
   oi-firmware/       ← firmware planning and scaffolding
 oi-project-docs/     ← public specs and architecture docs
-oi-v1/               ← v1 reference codebase
 ```
 
 ## Documentation
@@ -82,7 +81,6 @@ oi-v1/               ← v1 reference codebase
 | [`src/oi-gateway/openclaw.env.example`](src/oi-gateway/openclaw.env.example) | OpenClaw env template |
 | [`oi-project-docs/docs/specs/`](oi-project-docs/docs/specs/) | Public wire protocol specs |
 | [`oi-project-docs/docs/integrations/`](oi-project-docs/docs/integrations/) | Public ecosystem integration docs |
-| [`oi-v1/README.md`](oi-v1/README.md) | v1 codebase overview |
 
 ## Quick start
 

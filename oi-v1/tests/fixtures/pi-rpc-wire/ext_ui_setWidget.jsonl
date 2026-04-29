@@ -1,2 +1,0 @@
-{"comment": "server sends extension UI setWidget, no response expected"}
-{"emit": {"type": "extension_ui_request", "id": "req-1", "method": "setWidget", "widgetKey": "my-ext", "widgetLines": ["--- Status ---", "Build passed"], "widgetPlacement": "aboveEditor"}}

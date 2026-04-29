@@ -1,2 +1,0 @@
-{"comment": "server emits compaction_end event"}
-{"emit": {"type": "compaction_end", "reason": "threshold", "result": {"summary": "Conversation summary...", "firstKeptEntryId": "abc123", "tokensBefore": 150000, "details": {}}, "aborted": false, "willRetry": false}}

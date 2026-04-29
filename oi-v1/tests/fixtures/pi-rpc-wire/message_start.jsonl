@@ -1,2 +1,0 @@
-{"comment": "server emits message_start event"}
-{"emit": {"type": "message_start", "message": {"role": "assistant", "content": [], "timestamp": 1733234567890}}}

@@ -1,2 +1,0 @@
-{"comment": "server emits turn_end event with assistant message and tool results"}
-{"emit": {"type": "turn_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "Done."}], "timestamp": 1733234567890}, "toolResults": [{"role": "toolResult", "toolCallId": "call_1", "toolName": "bash", "content": [{"type": "text", "text": "ok"}], "isError": false, "timestamp": 1733234567891}]}}

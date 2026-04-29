@@ -1,3 +1,0 @@
-{"comment": "client exports session to HTML, server responds with output path"}
-{"expect": {"type": "export_html", "id": "<echo>", "outputPath": "/tmp/session.html"}}
-{"emit": {"type": "response", "command": "export_html", "id": "<echo>", "success": true, "data": {"path": "/tmp/session.html"}}}

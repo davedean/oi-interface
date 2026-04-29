@@ -1,3 +1,0 @@
-{"comment": "client aborts a running bash command, server acknowledges"}
-{"expect": {"type": "abort_bash", "id": "<echo>"}}
-{"emit": {"type": "response", "command": "abort_bash", "id": "<echo>", "success": true}}

@@ -1,3 +1,0 @@
-{"comment": "client switches to a different session file, server acknowledges"}
-{"expect": {"type": "switch_session", "id": "<echo>", "sessionPath": "/tmp/other-session.jsonl"}}
-{"emit": {"type": "response", "command": "switch_session", "id": "<echo>", "success": true, "data": {"cancelled": false}}}

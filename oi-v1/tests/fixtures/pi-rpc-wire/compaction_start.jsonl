@@ -1,2 +1,0 @@
-{"comment": "server emits compaction_start event"}
-{"emit": {"type": "compaction_start", "reason": "manual"}}

@@ -1,3 +1,0 @@
-{"comment": "client sets thinking level, server acknowledges"}
-{"expect": {"type": "set_thinking_level", "id": "<echo>", "level": "high"}}
-{"emit": {"type": "response", "command": "set_thinking_level", "id": "<echo>", "success": true}}

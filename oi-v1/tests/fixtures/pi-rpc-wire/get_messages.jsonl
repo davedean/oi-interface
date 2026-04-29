@@ -1,3 +1,0 @@
-{"comment": "client requests conversation messages, server responds with message list"}
-{"expect": {"type": "get_messages", "id": "<echo>"}}
-{"emit": {"type": "response", "command": "get_messages", "id": "<echo>", "success": true, "data": {"messages": [{"role": "user", "content": "Hello, world!"}, {"role": "assistant", "content": [{"type": "text", "text": "Hi! How can I help you?"}]}]}}}

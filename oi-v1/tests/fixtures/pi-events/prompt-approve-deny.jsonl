@@ -1,6 +1,0 @@
-{"type":"snapshot","data":{"sessions":{"active_session_id":"s1","list":[{"session_id":"s1","name":"alpha","status":"waiting","pending_count":2,"stale":false,"last_seen_age_s":0}]},"prompts":[{"prompt_id":"p-approve","session_id":"s1","title":"Approve?","body":"allow tool","options":[{"label":"Approve","value":"approve"},{"label":"Deny","value":"deny"}],"status":"pending"},{"prompt_id":"p-deny","session_id":"s1","title":"Deny?","body":"reject tool","options":[{"label":"Approve","value":"approve"},{"label":"Deny","value":"deny"}],"status":"pending"}],"queued_commands":[]}}
-{"type":"expect","data":{"view":"prompt","prompt":{"pending":true,"prompt_id":"p-approve","session_id":"s1"}}}
-{"type":"action","name":"prompt.answer","data":{"prompt_id":"p-approve","value":"approve"}}
-{"type":"expect","data":{"view":"prompt","prompt":{"pending":true,"prompt_id":"p-deny"},"sessions":{"list":[{"pending_count":1}]},"last_action_result":{"ok":true,"code":"prompt_answered"}}}
-{"type":"action","name":"prompt.answer","data":{"prompt_id":"p-deny","value":"deny"}}
-{"type":"expect","data":{"view":"idle","prompt":{"pending":false,"prompt_id":null},"sessions":{"list":[{"pending_count":0}]},"last_action_result":{"ok":true,"code":"prompt_answered"}}}
