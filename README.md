@@ -2,137 +2,116 @@
 
 > One mind. Many bodies. Human in control.
 
-Oi is a local-first I/O bus for personal agents — tiny voice terminals and every device you already own.
+Oi is a local-first input/output layer for personal agents. It connects embodied devices, a gateway, and a user-owned agent runtime so you can interact with the same assistant from a desk puck, phone, watch, dashboard, or terminal.
 
-Devices — a voice puck on your desk, a watch on your wrist, a phone in your pocket — are embodiments: they provide input, show state, and play back responses. Your agent (pi, OpenClaw, or any channel-compatible backend) runs the intelligence, makes routing decisions, and uses Oi as its surface. You decide when it speaks.
+## What it does
 
-## What it is
+- Captures explicit user input from devices, not always-on listening.
+- Routes device context into agent requests so responses can fit the active surface.
+- Keeps device behavior deterministic, with a fixed button grammar and safe state transitions.
+- Supports local-first operation with optional hosted bridges and third-party agent backends.
 
-- **Not another voice assistant.** Oi is an embodied I/O surface **for your existing agent**, not a standalone chatbot.
-- **Local-first.** Runs entirely on a Pi or home server. Cloud is additive, never required.
-- **Device-context aware.** Every message to the agent includes what devices are present, what they can do, and which is foreground — so your agent can make smart routing decisions.
-- **Multi-device.** One agent, many bodies. M5Stick on the desk, Apple Watch on the wrist, desktop dashboard on screen, all driven by the same agent intelligence.
-- **Firmware-protected interaction.** Button grammar is hardcoded in firmware; no remote agent can rebind it. User control is guaranteed even if the model behaves unexpectedly.
+## Current state
 
-## Status
+The core loop is implemented in-tree and verified across the main subprojects.
 
-**✅ Phase 1 Complete** and **substantial Phase 2+ work is already implemented**.
+Included today:
 
-Current subproject verification via `python3 runtests.py`:
-- `oi-gateway`: 563 passed, 71 skipped
-- `oi-sim`: 74 passed
-- `oi-cli`: 30 passed
-- `oi-dashboard`: 23 passed
-
-Implemented and verified in the tree:
-- Full DATP implementation with hello handshake
-- oi-sim virtual device (scriptable, hardware-independent)
-- Device registry + SQLite persistence
-- STT (Whisper) + TTS (Piper) audio pipeline
-- Channel integration with pi agent backend
-- OpenClaw backend support via `OI_AGENT_BACKEND=openclaw`
-- oi-cli tool interface + HTTP API
-- End-to-end test suite
-- Dashboard, character-pack support, routing/attention/multi-device scaffolding, and integration adapters
-
-See [`PLAN.md`](PLAN.md) for the detailed build plan and current implementation notes, and [`TECH_DEBT.md`](TECH_DEBT.md) for cleanup items.
+- DATP device transport
+- `oi-sim` virtual device
+- device registry and state persistence
+- STT and TTS pipeline
+- `oi-cli` command surface
+- dashboard and integration scaffolding
+- OpenClaw backend support
 
 ## Architecture
 
-Oi is an **I/O bus for personal agents**, not an agent runtime itself. It provides:
+Oi is an I/O bus for personal agents, not the agent runtime itself.
 
-### **Surfaces**
-- DATP protocol to embodied devices (M5Stick, phones, watches, screens)
-- Device registry with capability tracking
-- STT/TTS pipeline (Whisper/Piper)
-- Resource tree API exposed via `oi-cli`
+### Surfaces
 
-### **Context**
-- Device presence + capability injection into every agent message
-- Foreground detection (which device the user is interacting with)
-- Semantic status rendering (character packs)
+- DATP protocol to embodied devices
+- device registry with capability tracking
+- STT/TTS pipeline
+- resource tree API exposed via `oi-cli`
 
-### **Your Agent Does the Rest**
-- Task management, memory, wiki, tool decisions → your agent (pi/OpenClaw)
-- Routing choices → informed by device context from Oi
-- Tool execution → via `oi-cli` during agent loop (same as any CLI tool)
+### Context
 
-### **Key Protocol Boundaries**
-1. **DATP** – Device ↔ Gateway (WebSocket, audio streaming, commands)
-2. **Oi Channel** – Gateway ↔ Agent (JSONL RPC to pi, HTTP webhook to others)
-3. **Resource Tree API** – Agent ↔ Gateway (via `oi-cli` tool calls)
+- device presence and capabilities
+- foreground detection
+- semantic status rendering
 
-## Repo layout
+### Agent responsibilities
 
-```
-PLAN.md              ← authoritative v2 build plan (start here)
+- task management
+- memory and wiki decisions
+- tool selection
+- routing decisions informed by device context
+
+### Protocol boundaries
+
+1. `DATP` - device to gateway
+2. `Oi Channel` - gateway to agent
+3. `Resource Tree API` - agent to gateway
+
+## Repository layout
+
+```text
+PLAN.md              ← project plan and implementation notes
 src/                 ← v2 implementation
-  oi-gateway/        ← Python gateway: DATP, device registry, STT/TTS, resource tree API
-  oi-sim/            ← virtual DATP device (scriptable, dev/CI)
+  oi-gateway/        ← Python gateway: DATP, registry, STT/TTS, resource tree API
+  oi-sim/            ← virtual DATP device for dev and CI
   oi-cli/            ← CLI wrapper over the gateway API
-  oi-dashboard/      ← monitoring/debug dashboard
-  oi-firmware/       ← firmware planning/scaffolding for device targets
-oi-project-docs/     ← primary specs and architecture docs
-oi-v1/               ← v1 reference codebase (do not modify)
+  oi-dashboard/      ← monitoring and debug dashboard
+  oi-firmware/       ← firmware planning and scaffolding
+oi-project-docs/     ← public specs and architecture docs
+oi-v1/               ← v1 reference codebase
 ```
 
-## Hardware
-
-Primary device: [M5Stack StickS3](https://docs.m5stack.com/en/core/M5StickS3) (ESP32-S3, 135×240 display, 2 buttons, mic, speaker, Wi-Fi, battery).
-
-## Docs
+## Documentation
 
 | Document | Purpose |
 |---|---|
-| [`PLAN.md`](PLAN.md) | Full v2 plan: architecture, protocols, components, roadmap |
-| [`TECH_DEBT.md`](TECH_DEBT.md) | Technical debt tracking from Phase 1 |
-| [`ARCH_REVIEW.md`](ARCH_REVIEW.md) | Architectural review findings |
+| [`PLAN.md`](PLAN.md) | Project plan and implementation notes |
+| [`TECH_DEBT.md`](TECH_DEBT.md) | Current cleanup and follow-up items |
+| [`ARCH_REVIEW.md`](ARCH_REVIEW.md) | Architecture review notes |
 | [`start-oi.sh`](start-oi.sh) | Launcher for `pi`, `hermes`, and `openclaw` gateway runs |
+| [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md) | OpenClaw backend setup and local wiring |
 | [`src/oi-gateway/hermes.env.example`](src/oi-gateway/hermes.env.example) | Hermes backend env template |
-| [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md) | OpenClaw backend setup and local env wiring |
-| [`src/oi-gateway/openclaw.env.example`](src/oi-gateway/openclaw.env.example) | Example env file for the OpenClaw backend |
-| [`oi-project-docs/docs/specs/`](oi-project-docs/docs/specs/) | Public wire protocol specs (DATP, Oi Channel, etc.) |
-| [`oi-project-docs/docs/internal/`](oi-project-docs/docs/internal/) | Internal planning and ops docs |
+| [`src/oi-gateway/openclaw.env.example`](src/oi-gateway/openclaw.env.example) | OpenClaw env template |
+| [`oi-project-docs/docs/specs/`](oi-project-docs/docs/specs/) | Public wire protocol specs |
+| [`oi-project-docs/docs/integrations/`](oi-project-docs/docs/integrations/) | Public ecosystem integration docs |
 | [`oi-v1/README.md`](oi-v1/README.md) | v1 codebase overview |
 
-## Getting Started
-
-The core input+output loop is working end-to-end:
+## Quick start
 
 ```bash
-# Start oi-gateway (DATP + STT/TTS + API)
+# Gateway
 cd src/oi-gateway
 python3 -m oi_gateway
 
-# In another terminal, connect oi-sim (virtual device)
+# Virtual device
 cd src/oi-sim
 python3 -m oi_sim
 
-# In another terminal, use oi-cli to drive devices
+# CLI
 cd src/oi-cli
 python3 -m oi_cli devices
 python3 -m oi_cli route --device oi-sim --text "Hello from Oi"
 
-# Dashboard (optional)
+# Dashboard
 cd src/oi-dashboard
 oi-dashboard --api-url http://localhost:8788 --host localhost --port 8789
 
-# Or run the full test suite
-cd src/oi-gateway && python3 -m pytest tests/ -q
-cd src/oi-sim && python3 -m pytest tests/ -q
-
-# From repo root, run all v2 subproject suites in isolation
+# Full test run
 python3 runtests.py
 ```
 
-See [`PLAN.md`](PLAN.md) for the full 11-phase roadmap and [`TECH_DEBT.md`](TECH_DEBT.md) for current technical debt.
-
 ## OpenClaw
 
-Oi can route agent traffic to a running OpenClaw Gateway over WebSocket RPC.
+Oi can route agent traffic to a running OpenClaw gateway over WebSocket RPC.
 The wiring is documented in [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md).
-
-Use the launcher for backend selection:
 
 ```bash
 ./start-oi.sh start pi

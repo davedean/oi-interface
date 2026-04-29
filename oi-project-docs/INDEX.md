@@ -21,7 +21,6 @@
 - `docs/integrations/hermes-mqtt-rhasspy.md`
 - `docs/integrations/home-assistant.md`
 - `docs/integrations/mcp.md`
-- `docs/integrations/open-interpreter-01.md`
 - `docs/integrations/openclaw.md`
 - `docs/product/apple-ecosystem.md`
 - `docs/product/design-language.md`

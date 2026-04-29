@@ -55,7 +55,6 @@ docs/
     hermes-mqtt-rhasspy.md
     mcp.md
     home-assistant.md
-    open-interpreter-01.md
   product/
     positioning.md
     user-stories.md
@@ -105,8 +104,6 @@ Read:
 2. `docs/architecture/system-overview.md`
 3. `docs/specs/human-interaction-spec.md`
 4. `docs/specs/datp-wire-protocol.md`
-
-Internal planning, ops, and draft notes live under `docs/internal/` and are excluded from the public index.
 
 # Oi rename and strategic update
 

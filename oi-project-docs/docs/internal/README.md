@@ -8,6 +8,7 @@ They cover planning, operations, and draft/update material that is useful while 
 
 - `00-vision-oi-update.md`
 - `references.md`
+- `integrations-open-interpreter-01.md`
 - `ops/deployment.md`
 - `ops/observability.md`
 - `ops/secrets.md`
