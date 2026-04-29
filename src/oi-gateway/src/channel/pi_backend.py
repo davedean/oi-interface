@@ -110,6 +110,9 @@ class SubprocessPiBackend(AgentBackend):
                         sent_text = extracted
                         response_text = extracted
                         is_final = event_type in terminal_event_types
+                        # DEBUG: Add small delay to simulate real streaming
+                        import asyncio
+                        await asyncio.sleep(0.2)  # 200ms delay between deltas
                         yield AgentStreamChunk(
                             text_delta=delta,
                             is_final=is_final,
