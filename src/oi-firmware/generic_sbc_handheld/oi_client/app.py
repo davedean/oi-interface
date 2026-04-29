@@ -70,9 +70,13 @@ class HandheldApp:
         # Canned prompt selection
         self._prompt_idx = 0
 
-        # Audio cache buffer
-        self._audio_buffer = bytearray()
-        self._audio_stream_id: str | None = None
+        # Recording / audio cache state
+        self._recording_stream_id: str | None = None
+        self._recording_chunks: list[bytes] = []
+        self._recording_start_time: float = 0.0
+
+        # Per-response audio tracking: maps response_id -> wav_path
+        self._response_audio: dict[str, str] = {}
 
         # Menu
         self._menu_idx = 0
@@ -230,8 +234,10 @@ class HandheldApp:
 
         elif self._ui_mode == UIMode.CARD:
             if ev.name == "a":
-                # Replay audio if available
-                pass
+                last_response = list(self._response_audio.keys())[-1] if self._response_audio else "latest"
+                wav_path = self._response_audio.get(last_response)
+                if wav_path and os.path.exists(wav_path):
+                    self.audio.play(wav_path)
             elif ev.name == "b":
                 self._ui_mode = UIMode.HOME
                 self._card_scroll = 0
@@ -305,29 +311,33 @@ class HandheldApp:
             self._ui_mode = UIMode.CARD
 
         elif op == "audio.cache.put_begin":
-            self._audio_buffer = bytearray()
-            self._audio_stream_id = args.get("stream_id", f"stream_{uuid.uuid4().hex[:8]}")
+            self._recording_stream_id = args.get("stream_id", f"stream_{uuid.uuid4().hex[:8]}")
+            self._recording_chunks = []
 
         elif op == "audio.cache.put_chunk":
             import base64
             chunk = base64.b64decode(args.get("data_b64", ""))
-            self._audio_buffer.extend(chunk)
+            if chunk:
+                self._recording_chunks.append(chunk)
 
         elif op == "audio.cache.put_end":
-            if self._audio_buffer:
-                # Clean up old temp audio files before creating new one
-                for f in glob.glob("/tmp/oi_audio_*.wav"):
-                    try:
-                        os.unlink(f)
-                    except Exception:
-                        pass
-                wav = self.audio.save_wav(bytes(self._audio_buffer))
-                self.audio.play(wav)
-                self._audio_buffer = bytearray()
+            if self._recording_chunks:
+                combined = b''.join(self._recording_chunks)
+                wav = self.audio.save_wav(combined)
+                response_id = args.get("response_id", "latest")
+                self._response_audio[response_id] = str(wav)
+                self.audio.play(str(wav))
+                self._recording_chunks = []
 
         elif op == "audio.play":
             response_id = args.get("response_id", "latest")
-            pass  # Would play cached audio; not implemented in MVP
+            wav_path = self._response_audio.get(response_id)
+            if wav_path and os.path.exists(wav_path):
+                self.audio.play(wav_path)
+            elif response_id == "latest" and self._response_audio:
+                last_wav = list(self._response_audio.values())[-1]
+                if os.path.exists(last_wav):
+                    self.audio.play(last_wav)
 
         elif op == "audio.stop":
             self.audio.stop()
@@ -404,20 +414,26 @@ class HandheldApp:
 
         # Bottom hints
         hints = self._hint_for_mode()
+        # Show recording indicator if actively capturing
+        if self._ui_mode == UIMode.RECORDING:
+            self.renderer.draw_recording_indicator()
         self.renderer.draw_hints(hints)
 
         self.renderer.present()
 
     def _hint_for_mode(self) -> str:
         if self._ui_mode == UIMode.CARD:
-            return "A=Replay  B=Back  Up/Down=Scroll"
+            has_audio = bool(self._response_audio)
+            if has_audio:
+                return "A=Replay  B=Back  Up/Down=Scroll"
+            return "B=Back  Up/Down=Scroll"
         elif self._ui_mode == UIMode.HOME:
             return "Up/Down=Select  A=Send  Start=Menu"
         elif self._ui_mode == UIMode.MENU:
             return "Up/Down=Select  A=Confirm  B=Cancel"
         elif self._ui_mode in (UIMode.ERROR, UIMode.OFFLINE):
             return "A=Retry  B=Quit"
-        elif self._ui_mode == UIMode.WAITING:
+        elif self._ui_mode == UIMode.WAITING or self._ui_mode == UIMode.RECORDING:
             return "B=Cancel"
         return "A=Select  B=Back  Start=Menu"
 

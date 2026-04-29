@@ -209,6 +209,17 @@ class Sdl2Renderer:
             self._draw_tex(tex, x, y, w, h)
             self._destroy_tex(tex)
 
+    def draw_recording_indicator(self) -> None:
+        """Draw a pulsing red recording dot in the top-right area."""
+        import time
+        pulse = abs((time.time() * 2) % 2 - 1)  # 0..1..0
+        alpha = int(150 + 105 * pulse)
+        red = SDL_Color(230, 60, 60, alpha)
+        self._rect(self.width - 30, 12, 14, 14, red)
+        # Draw a smaller white dot inside
+        self._rect(self.width - 27, 15, 8, 8, SDL_Color(255, 255, 255, alpha))
+
     def effective_text_grid(self) -> tuple[int, int]:
         """Return approximate (cols, rows) at current font size."""
         return (40, 18)
+
