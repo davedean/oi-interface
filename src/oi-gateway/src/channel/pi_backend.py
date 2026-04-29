@@ -98,6 +98,7 @@ class SubprocessPiBackend(AgentBackend):
 
                 event_type = event.get("type")
                 extracted = self._extract_text(event)
+                emitted = False
                 if extracted and extracted.strip():
                     # Only yield the DELTA (new text), not the full text
                     if extracted.startswith(sent_text):
@@ -105,14 +106,12 @@ class SubprocessPiBackend(AgentBackend):
                     else:
                         # Text doesn't match up, send full new text
                         delta = extracted
-                    
+
                     if delta:
                         sent_text = extracted
                         response_text = extracted
                         is_final = event_type in terminal_event_types
-                        # DEBUG: Add small delay to simulate real streaming
-                        import asyncio
-                        await asyncio.sleep(0.2)  # 200ms delay between deltas
+                        emitted = True
                         yield AgentStreamChunk(
                             text_delta=delta,
                             is_final=is_final,
@@ -141,7 +140,14 @@ class SubprocessPiBackend(AgentBackend):
                         break
                     continue
 
-                logger.debug("Ignoring non-terminal pi event type=%r", event_type)
+                if not emitted:
+                    if event_type == "message_update":
+                        logger.debug(
+                            "No streamable text extracted from message_update assistantMessageEvent=%r",
+                            event.get("assistantMessageEvent"),
+                        )
+                    else:
+                        logger.debug("Ignoring non-terminal pi event type=%r", event_type)
         except asyncio.TimeoutError as exc:
             raise PiBackendError(
                 f"pi subprocess timed out waiting for response after {self._timeout_seconds:.1f}s"
@@ -202,10 +208,17 @@ class SubprocessPiBackend(AgentBackend):
         if isinstance(assistant_event, dict):
             assistant_event_type = assistant_event.get("type")
             if assistant_event_type in {"text_delta", "text_end", "text_start"}:
-                for key in ("content", "delta"):
+                for key in ("content", "delta", "text"):
                     val = assistant_event.get(key)
                     if isinstance(val, str) and val.strip():
                         return val
+
+                content_value = assistant_event.get("content")
+                if isinstance(content_value, dict):
+                    text = self._extract_message_text(content_value)
+                    if text:
+                        return text
+
                 partial = assistant_event.get("partial")
                 text = self._extract_message_text(partial)
                 if text:

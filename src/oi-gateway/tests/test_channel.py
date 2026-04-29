@@ -553,6 +553,37 @@ async def test_subprocess_backend_message_update_text_end_returns_final_text():
 
 
 @pytest.mark.asyncio
+async def test_subprocess_backend_message_update_text_field_streams():
+    """Verify message_update/text payload variant is parsed for streaming text."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from channel.pi_backend import SubprocessPiBackend
+
+    backend = SubprocessPiBackend(pi_command=["pi", "--mode", "rpc", "--no-session"])
+    lines = [
+        b'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"text":"Hel"}}\n',
+        b'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"text":"Hello"}}\n',
+        b'{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"text":"Hello!"}}\n',
+        b'{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"Hello!"}]}]}\n',
+    ]
+
+    mock_proc = MagicMock()
+    mock_proc.stdin = MagicMock()
+    mock_proc.stdin.drain = AsyncMock()
+    mock_proc.stdin.is_closing = MagicMock(return_value=False)
+    mock_proc.stdout = AsyncMock()
+    mock_proc.stdout.readline = AsyncMock(side_effect=lines)
+    mock_proc.stderr = AsyncMock()
+    mock_proc.returncode = None
+    mock_proc.kill = MagicMock()
+    mock_proc.wait = AsyncMock(return_value=0)
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        result = await backend.send_prompt("hello")
+
+    assert result == "Hello!"
+
+
+@pytest.mark.asyncio
 async def test_subprocess_backend_ignores_extension_notify_and_toolcall_text():
     """Verify startup notifications and tool-call deltas never become the returned response."""
     from unittest.mock import AsyncMock, MagicMock, patch
