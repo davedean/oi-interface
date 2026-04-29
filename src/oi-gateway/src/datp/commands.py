@@ -15,6 +15,7 @@ from .messages import (
     build_device_mute_until,
     build_device_set_brightness,
     build_display_show_card,
+    build_display_show_text_delta,
     build_display_show_status,
 )
 
