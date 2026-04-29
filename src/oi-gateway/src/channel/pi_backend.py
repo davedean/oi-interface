@@ -13,17 +13,6 @@ from .request_builder import render_text_prompt
 
 logger = logging.getLogger(__name__)
 
-    async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
-        """Return a fixed streaming response without spawning a subprocess."""
-        self._last_message = render_text_prompt(request)
-        self._call_count += 1
-        yield AgentStreamChunk(
-            text_delta=self._response,
-            is_final=True,
-            metadata={"stub": True},
-        )
-
-
 class PiBackendError(AgentBackendError):
     """Backward-compatible alias for Pi backend failures."""
 
@@ -170,7 +159,7 @@ class SubprocessPiBackend(AgentBackend):
             if chunk.text_delta and chunk.text_delta.strip():
                 last_text = chunk.text_delta
         if last_text is None:
-            raise PiBackendError("pi subprocess returned no usable response text")
+            raise PiBackendError("pi closed stdout without usable response text")
         return last_text
 
     async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
@@ -307,3 +296,14 @@ class StubPiBackend(AgentBackend):
     @property
     def call_count(self) -> int:
         return self._call_count
+    async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
+        """Return a fixed streaming response without spawning a subprocess."""
+        from .request_builder import render_text_prompt
+        self._last_message = render_text_prompt(request)
+        self._call_count += 1
+        yield AgentStreamChunk(
+            text_delta=self._response,
+            is_final=True,
+            metadata={"stub": True},
+        )
+
