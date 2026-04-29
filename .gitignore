@@ -102,3 +102,6 @@ src/oi-sim/progress.md
 
 # deploy scripts
 deploy_*.sh
+
+# reference repos etc
+references
