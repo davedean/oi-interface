@@ -39,7 +39,8 @@ DEFAULT_CAPABILITIES: dict[str, Any] = {
     "commands_supported": [
         "display.show_status",
         "display.show_card",
-        "display.show_text_delta",
+        "display.show_progress",
+        "display.show_response_delta",
         "audio.cache.put_begin",
         "audio.cache.put_chunk",
         "audio.cache.put_end",

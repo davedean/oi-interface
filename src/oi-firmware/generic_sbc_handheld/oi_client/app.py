@@ -201,6 +201,8 @@ class HandheldApp:
             "commands_supported": [
                 "display.show_status",
                 "display.show_card",
+                "display.show_progress",
+                "display.show_response_delta",
                 "audio.cache.put_begin",
                 "audio.cache.put_chunk",
                 "audio.cache.put_end",
@@ -384,6 +386,28 @@ class HandheldApp:
             self._card_scroll = 0
             self._ui_mode = UIMode.CARD
 
+        elif op == "display.show_progress":
+            text = (args.get("text", "") or "").strip()
+            if text:
+                if self._ui_mode == UIMode.WAITING:
+                    self._card.title = "Working"
+                    body = self._card.body or ""
+                    self._card.body = (body + ("\n" if body else "") + f"• {text}")[-1200:]
+
+        elif op == "display.show_response_delta":
+            text_delta = args.get("text_delta", "")
+            is_final = bool(args.get("is_final", False))
+            if text_delta:
+                if self._ui_mode != UIMode.CARD or self._card.title != "Response":
+                    self._card.title = "Response"
+                    self._card.body = ""
+                self._card.body = (self._card.body or "") + text_delta
+            if is_final:
+                self._card_scroll = 0
+                self._ui_mode = UIMode.CARD
+            elif self._ui_mode == UIMode.WAITING and text_delta:
+                self._ui_mode = UIMode.CARD
+
         elif op == "character.set_state":
             self._character_sprite = args.get("sprite")
             self._character_label = args.get("label", "")
@@ -517,34 +541,30 @@ class HandheldApp:
         """Draw character state if available."""
         if not self._character_sprite:
             return
-        # Render character label in the top area below title bar
-        try:
-            from sdl2 import sdl2
-            from oi_client.renderer import RenderColors
-            # Draw a small character preview box
-            box_x, box_y = 10, 34
-            box_w, box_h = 100, 26
-            # Background for character display
-            color = RenderColors.card_bg
-            self.renderer._rect(box_x, box_y, box_w, box_h, color)
-            
-            # Draw pulsing dot animation for idle state
-            if self._character_animation and self._character_animation in ("idle", "breathe", "pulse"):
-                frame = int(time.time() * 3) % 3
-                dot_x = box_x + box_w - 16 + (frame * 3)
-                dot_y = box_y + box_h // 2 - 3
-                # Pulsing dot (green for online/active feel)
-                self.renderer._rect(dot_x, dot_y, 6, 6, RenderColors.online)
-            
-            # Draw character label
-            if self._character_label:
-                label_text = self._character_label[:14] + ("…" if len(self._character_label) > 14 else "")
-                tex, w, h = self.renderer._text(self.renderer._font_hint, label_text, RenderColors.accent)
-                if tex:
-                    self.renderer._draw_tex(tex, box_x + 6, box_y + 4, w, h)
-                    self.renderer._destroy_tex(tex)
-        except Exception:
-            pass
+
+        from oi_client.renderer import RenderColors
+
+        # Draw a small character preview box
+        box_x, box_y = 10, 34
+        box_w, box_h = 160, 26
+        self.renderer._rect(box_x, box_y, box_w, box_h, RenderColors.card_bg)
+
+        # Draw pulsing dot animation for idle state
+        if self._character_animation and self._character_animation in ("idle", "breathe", "pulse"):
+            frame = int(time.time() * 3) % 3
+            dot_x = box_x + box_w - 24 + (frame * 3)
+            dot_y = box_y + box_h // 2 - 3
+            self.renderer._rect(dot_x, dot_y, 6, 6, RenderColors.online)
+
+        # Prefer label, fallback to sprite id so the box is never blank.
+        raw = (self._character_label or self._character_sprite or "").strip()
+        if not raw:
+            return
+        label_text = raw[:22] + ("…" if len(raw) > 22 else "")
+        tex, w, h = self.renderer._text(self.renderer._font_hint, label_text, RenderColors.accent)
+        if tex:
+            self.renderer._draw_tex(tex, box_x + 6, box_y + 4, w, h)
+            self.renderer._destroy_tex(tex)
 
     def _hint_for_mode(self) -> str:
         if self._ui_mode == UIMode.CARD:

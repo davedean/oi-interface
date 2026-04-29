@@ -15,7 +15,8 @@ from .messages import (
     build_device_mute_until,
     build_device_set_brightness,
     build_display_show_card,
-    build_display_show_text_delta,
+    build_display_show_progress,
+    build_display_show_response_delta,
     build_display_show_status,
 )
 
@@ -173,7 +174,7 @@ class CommandDispatcher:
         msg = build_display_show_card(device_id, title, options, body)
         return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
 
-    async def show_text_delta(
+    async def show_response_delta(
         self,
         device_id: str,
         text_delta: str,
@@ -181,27 +182,18 @@ class CommandDispatcher:
         sequence: int | None = None,
         timeout: float = 5.0,
     ) -> bool:
-        """Send a text delta during streaming response.
+        msg = build_display_show_response_delta(device_id, text_delta, is_final, sequence)
+        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
 
-        Parameters
-        ----------
-        device_id : str
-            Target device.
-        text_delta : str
-            Text fragment to display.
-        is_final : bool, optional
-            True if this is the final chunk. Default False.
-        sequence : int, optional
-            Sequence number for ordering deltas.
-        timeout : float, optional
-            Ack timeout in seconds.
-
-        Returns
-        -------
-        bool
-            True if ack'd.
-        """
-        msg = build_display_show_text_delta(device_id, text_delta, is_final, sequence)
+    async def show_progress(
+        self,
+        device_id: str,
+        text: str,
+        kind: str | None = None,
+        sequence: int | None = None,
+        timeout: float = 5.0,
+    ) -> bool:
+        msg = build_display_show_progress(device_id, text, kind, sequence)
         return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
 
     async def cache_put_begin(

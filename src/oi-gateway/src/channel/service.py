@@ -191,19 +191,39 @@ class ChannelService:
         last_final = False
         chunk_count = 0
         logger.info("Starting streaming request for device %s", request.source_device_id)
+        last_progress_text = None
         async for chunk in streaming_method(request):
             chunk_count += 1
             if not isinstance(chunk, AgentStreamChunk):
                 continue
-            if chunk.text_delta:
-                last_text = chunk.text_delta if chunk.is_final else last_text + chunk.text_delta
+            progress_text = chunk.metadata.get("progress_text") if chunk.metadata else None
+            if progress_text and progress_text != last_progress_text:
+                last_progress_text = progress_text
+                self._event_bus.emit(
+                    "agent_progress",
+                    request.source_device_id,
+                    {
+                        "stream_id": request.stream_id,
+                        "text": progress_text,
+                        "kind": "status",
+                        "device_context": request.device_context,
+                        "reply_constraints": request.reply_constraints,
+                        "backend_name": getattr(self._pi_backend, "name", "unknown"),
+                        "session_key": request.session_key,
+                        "correlation_id": request.correlation_id,
+                    },
+                )
+
+            if chunk.text_delta or chunk.is_final:
+                if chunk.text_delta:
+                    last_text = chunk.text_delta if chunk.is_final else last_text + chunk.text_delta
                 last_final = chunk.is_final
                 logger.debug("Emitting delta: device=%s seq=%d final=%s text=%r", 
                             request.source_device_id, chunk_count, chunk.is_final, 
                             chunk.text_delta[:50] if chunk.text_delta else "")
                 # Emit delta for real-time display on devices
                 self._event_bus.emit(
-                    "agent_response_delta",
+                    "agent_response_stream",
                     request.source_device_id,
                     {
                         "stream_id": request.stream_id,

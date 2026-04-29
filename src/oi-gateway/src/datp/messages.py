@@ -309,24 +309,32 @@ def build_display_show_card(
     return build_command(device_id, "display.show_card", args)
 
 
-def build_display_show_text_delta(
+def build_display_show_response_delta(
     device_id: str,
     text_delta: str,
     is_final: bool = False,
     sequence: int | None = None,
 ) -> dict[str, Any]:
-    """Send a text delta during streaming response.
-    
-    Args:
-        device_id: Target device ID.
-        text_delta: Text fragment to display.
-        is_final: True if this is the final chunk.
-        sequence: Optional sequence number for ordering.
-    """
+    """Send a final-response text delta during streaming."""
     args: dict[str, Any] = {"text_delta": text_delta, "is_final": is_final}
     if sequence is not None:
         args["sequence"] = sequence
-    return build_command(device_id, "display.show_text_delta", args)
+    return build_command(device_id, "display.show_response_delta", args)
+
+
+def build_display_show_progress(
+    device_id: str,
+    text: str,
+    kind: str | None = None,
+    sequence: int | None = None,
+) -> dict[str, Any]:
+    """Send a progress update while agent is working."""
+    args: dict[str, Any] = {"text": text}
+    if kind is not None:
+        args["kind"] = kind
+    if sequence is not None:
+        args["sequence"] = sequence
+    return build_command(device_id, "display.show_progress", args)
 
 
 def build_audio_cache_put_begin(

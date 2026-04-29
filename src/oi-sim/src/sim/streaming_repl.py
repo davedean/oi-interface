@@ -45,12 +45,29 @@ class StreamingOiSimREPL(OiSimREPL):
                     op = cmd.get("op", "unknown")
                     args = cmd.get("args", {})
 
-                    if op == "display.show_text_delta":
+                    if op == "display.show_progress":
+                        text = args.get("text", "")
+                        if text:
+                            print(f"⚙️  {text}")
+                        continue
+
+                    if op == "display.show_response_delta":
                         text_delta = args.get("text_delta", "")
                         is_final = args.get("is_final", False)
+
+                        # Progress/status lines are wrapped like "\n[thinking] ...\n"
+                        # and should be shown separately from assistant answer text.
+                        stripped = text_delta.strip()
+                        is_progress = stripped.startswith("[") and "]" in stripped and text_delta.startswith("\n")
+
                         if text_delta:
-                            self.current_response_text += text_delta
-                            print(text_delta, end="", flush=True)
+                            if is_progress:
+                                # Keep progress compact (no extra blank spacer lines)
+                                print(f"⚙️  {stripped}")
+                            else:
+                                self.current_response_text += text_delta
+                                print(text_delta, end="", flush=True)
+
                         if is_final:
                             print()
                             self.current_response_text = ""

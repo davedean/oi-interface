@@ -383,7 +383,8 @@ REQUIRED_COMMANDS = [
 
 # Optional commands for advanced features (not required for basic compliance)
 OPTIONAL_COMMANDS = [
-    "display.show_text_delta",
+    "display.show_response_delta",
+    "display.show_progress",
 ]
 
 # ------------------------------------------------------------------
