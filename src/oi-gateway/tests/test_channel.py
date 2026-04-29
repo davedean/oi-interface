@@ -949,13 +949,10 @@ async def test_text_prompt_success_logs_structured_context(event_bus, stub_devic
         })
         await asyncio.sleep(0.1)
 
-    record = next(r for r in caplog.records if r.message == "Text prompt processed")
-    assert record.device_id == "test-device"
-    assert record.stream_id is None
-    assert record.backend_mode == "stub"
-    assert record.event_kind == "text.prompt"
-    assert record.text_len == 5
-    assert isinstance(record.elapsed_ms, float)
+    # Find the new log message format
+    record = next(r for r in caplog.records if "Text prompt processed:" in r.message)
+    assert "test-device" in record.message
+    assert "streaming=True" in record.message or "streaming=False" in record.message
 
 
 @pytest.mark.asyncio

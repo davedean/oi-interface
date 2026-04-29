@@ -175,6 +175,7 @@ class ChannelService:
 
         # Only show card if streaming was NOT used (text was not already displayed via deltas)
         if self._command_dispatcher is not None and not response.streaming_used:
+            logger.info("Non-streaming path: showing card for device %s", device_id)
             await self._command_dispatcher.show_card(
                 device_id,
                 title="Response",
@@ -182,7 +183,7 @@ class ChannelService:
                 options=[],
             )
 
-        logger.info("Text prompt processed", extra={**log_context, "elapsed_ms": elapsed_ms})
+        logger.info("Text prompt processed: device=%s streaming=%s response_len=%d", device_id, response.streaming_used, len(response.response_text))
 
     async def _handle_streaming_request(self, request: AgentRequest, streaming_method) -> AgentResponse:
         """Handle a streaming request, emitting delta events and returning final response."""

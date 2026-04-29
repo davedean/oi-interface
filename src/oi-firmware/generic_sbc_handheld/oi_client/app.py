@@ -461,7 +461,14 @@ class HandheldApp:
             self.renderer.draw_card("Home", lines, 0)
 
         elif self._ui_mode == UIMode.WAITING:
-            self.renderer.draw_card("Waiting", ["Sending to gateway..."], 0)
+            # While waiting, show live status/partial text if gateway provides it
+            # via display.show_status(label=...). Fallback to default waiting text.
+            waiting_lines = ["Sending to gateway..."]
+            if self._card.body:
+                body_lines = [ln for ln in self._card.body.split("\n") if ln.strip()]
+                if body_lines:
+                    waiting_lines = body_lines
+            self.renderer.draw_card("Waiting", waiting_lines, 0)
             self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
 
         elif self._ui_mode == UIMode.CARD:

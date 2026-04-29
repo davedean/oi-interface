@@ -25,7 +25,7 @@ from sdl2 import (
     SDL_Color,
     SDL_QuitSubSystem, SDL_Quit,
 )
-from sdl2.sdlttf import TTF_Init, TTF_Quit, TTF_OpenFont, TTF_CloseFont, TTF_RenderText_Solid
+from sdl2.sdlttf import TTF_Init, TTF_Quit, TTF_OpenFont, TTF_CloseFont, TTF_RenderUTF8_Solid
 
 
 # Try a few system fonts
@@ -133,7 +133,9 @@ class Sdl2Renderer:
         SDL_RenderFillRect(self._renderer, ctypes.byref(rect))
 
     def _text(self, font, text: str, color: SDL_Color) -> tuple:
-        surf = TTF_RenderText_Solid(font, text.encode(), color)
+        # Use UTF-8 renderer so non-ASCII labels (emoji/symbols/accents) don't
+        # degrade into replacement boxes.
+        surf = TTF_RenderUTF8_Solid(font, text.encode("utf-8"), color)
         if not surf:
             return None, 0, 0
         tex = sdl2.SDL_CreateTextureFromSurface(self._renderer, surf)
