@@ -18,6 +18,7 @@ from oi_client.input import Sdl2Input, InputEvent
 from oi_client.renderer import Sdl2Renderer
 from oi_client.audio import HandheldAudio
 from oi_client.datp import DatpClient
+import time
 
 
 class UIMode(Enum):
@@ -196,8 +197,21 @@ class HandheldApp:
         self._draw_frame()
         self._spinner_frame += 1
 
+        # Stream recorded audio chunks if actively recording
+        await self._stream_recorded_audio()
+
         # Sleep for ~33ms (30fps)
         await asyncio.sleep(0.033)
+
+    async def _stream_recorded_audio(self) -> None:
+        """Read any newly recorded PCM audio and stream it to gateway."""
+        if not self.audio.is_recording:
+            return
+        chunk = self.audio.read_recording()
+        if chunk and self.datp and self.datp.is_connected and self._ui_mode == UIMode.RECORDING:
+            stream_id = f"rec_{int(self._recording_start_time * 1000)}"
+            # We don't track seq here since chunking is coarse
+            await self.datp.send_audio_chunk(stream_id, 0, chunk, 16000)
 
     # ------------------------------------------------------------------
     # Input handling
@@ -222,11 +236,23 @@ class HandheldApp:
 
         if self._ui_mode in (UIMode.HOME, UIMode.READY):
             if ev.name == "a":
-                # Send selected prompt
-                prompt = CANNED_PROMPTS[self._prompt_idx]
-                await self._send_prompt(prompt)
+                if ev.action == "long_press":
+                    # Start recording on long press of A
+                    await self.start_recording()
+                elif ev.action == "pressed":
+                    # Short press: send selected prompt (only if not recording)
+                    if self._ui_mode != UIMode.RECORDING:
+                        prompt = CANNED_PROMPTS[self._prompt_idx]
+                        await self._send_prompt(prompt)
+                elif ev.action == "long_release":
+                    # Stop recording on release after long press
+                    await self.stop_recording()
             elif ev.name == "b":
-                pass  # no-op in home
+                if self._ui_mode == UIMode.RECORDING:
+                    # Cancel recording
+                    await self.stop_recording()
+                    self._ui_mode = UIMode.HOME if self._online else UIMode.OFFLINE
+                # else: no-op in home
             elif ev.name == "up":
                 self._prompt_idx = (self._prompt_idx - 1) % len(CANNED_PROMPTS)
             elif ev.name == "down":
@@ -439,3 +465,39 @@ class HandheldApp:
 
     def width_center(self, text_width: int) -> int:
         return (480 - text_width) // 2
+
+    # ------------------------------------------------------------------
+    # Recording control
+    # ------------------------------------------------------------------
+
+    async def start_recording(self) -> bool:
+        """Start voice recording and streaming to gateway."""
+        if not self.datp or not self.datp.is_connected:
+            return False
+        if self.audio.is_recording:
+            return True
+        if not self.audio.recording_init():
+            return False
+        ok = self.audio.start_recording()
+        if ok:
+            self._ui_mode = UIMode.RECORDING
+            self._recording_start_time = time.time()
+        return ok
+
+    async def stop_recording(self) -> None:
+        """Stop voice recording and send final event."""
+        if not self.audio.is_recording:
+            return
+        duration_ms = int((time.time() - self._recording_start_time) * 1000)
+        self.audio.stop_recording()
+        # Send any remaining chunks
+        chunk = self.audio.read_recording()
+        if chunk and self.datp and self.datp.is_connected:
+            stream_id = f"rec_{int(self._recording_start_time * 1000)}"
+            await self.datp.send_audio_chunk(stream_id, 0, chunk, 16000)
+            await self.datp.send_recording_finished(stream_id, duration_ms)
+        self._ui_mode = UIMode.READY if self._online else UIMode.OFFLINE
+
+    def _is_recording_button(self, name: str, action: str) -> bool:
+        """Check if this is a recording trigger (button A long-press)."""
+        return name == "a" and action in ("long_press", "long_release")

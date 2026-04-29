@@ -8,6 +8,7 @@ Optional capture via SDL2 audio capture API.
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import os
 import subprocess
 import tempfile
@@ -122,3 +123,129 @@ class HandheldAudio:
             fh.write(header)
             fh.write(pcm16_data)
         return Path(path)
+
+    # ------------------------------------------------------------------
+    # Recording (SDL2 capture)
+    # ------------------------------------------------------------------
+
+    def recording_init(self) -> bool:
+        """Initialize SDL2 audio capture subsystem.
+
+        Returns True if at least one capture device is available.
+        """
+        try:
+            os.environ.setdefault("PYSDL2_DLL_PATH", "/usr/lib")
+            import sdl2
+            if sdl2.SDL_Init(sdl2.SDL_INIT_AUDIO) != 0:
+                return False
+            num = sdl2.SDL_GetNumAudioDevices(1)
+            if num > 0:
+                return True
+            sdl2.SDL_QuitSubSystem(sdl2.SDL_INIT_AUDIO)
+        except Exception:
+            pass
+        return False
+
+    def start_recording(
+        self,
+        sample_rate: int = 16000,
+        channels: int = 1,
+        format_pcm16: bool = True,
+    ) -> bool:
+        """Start capturing audio from the default input device.
+
+        The captured PCM16 data can be retrieved with read_recording().
+        Returns True on success.
+        """
+        try:
+            import sdl2
+            from sdl2 import (
+                SDL_OpenAudioDevice, SDL_AudioSpec,
+                SDL_AUDIO_ALLOW_FORMAT_CHANGE, SDL_TRUE,
+            )
+        except Exception:
+            return False
+
+        if getattr(self, "_recording", False):
+            return False
+
+        # Use the same default device detection as in detect()
+        desired = SDL_AudioSpec(
+            freq=sample_rate,
+            format=sdl2.AUDIO_S16LSB if format_pcm16 else sdl2.AUDIO_S8,
+            channels=channels,
+            samples=1024,
+        )
+        obtained = SDL_AudioSpec(freq=0, format=0, channels=0, samples=0)
+
+        self._recording_dev = SDL_OpenAudioDevice(
+            None,  # default device
+            1,     # iscapture
+            desired,
+            obtained,
+            SDL_AUDIO_ALLOW_FORMAT_CHANGE,
+        )
+
+        if self._recording_dev == 0:
+            return False
+
+        self._recording = True
+        self._recording_chunks = []
+        self._recording_sr = obtained.freq
+        self._recording_ch = obtained.channels
+        SDL_PauseAudioDevice(self._recording_dev, 0)  # unpause / start
+        return True
+
+    def stop_recording(self) -> None:
+        """Stop capturing audio."""
+        if getattr(self, "_recording", False) and getattr(self, "_recording_dev", 0):
+            try:
+                import sdl2
+                sdl2.SDL_PauseAudioDevice(self._recording_dev, 1)
+                sdl2.SDL_CloseAudioDevice(self._recording_dev)
+            except Exception:
+                pass
+        self._recording = False
+
+    def read_recording(self) -> bytes:
+        """Read all available captured PCM16 data as a single bytes object.
+
+        Returns empty bytes if not recording or nothing available.
+        """
+        if not getattr(self, "_recording", False):
+            return b""
+        try:
+            import sdl2
+            from sdl2 import SDL_DequeueAudio
+            # Query queued size
+            queued = sdl2.SDL_GetQueuedAudioSize(self._recording_dev)
+            if queued == 0:
+                return b""
+            # Dequeue in reasonable chunk sizes (max 4096 per call)
+            result = bytearray()
+            while queued > 0:
+                chunk_size = min(queued, 4096)
+                buf = bytearray(chunk_size)
+                c_buf = (ctypes.c_ubyte * chunk_size).from_buffer(buf)
+                received = SDL_DequeueAudio(self._recording_dev, c_buf, chunk_size)
+                if received > 0:
+                    result.extend(buf[:received])
+                queued -= received
+                if queued <= 0:
+                    break
+            return bytes(result)
+        except Exception as e:
+            return b""
+
+    @property
+    def is_recording(self) -> bool:
+        """Whether we are currently capturing audio."""
+        return getattr(self, "_recording", False)
+
+    def recording_info(self) -> dict:
+        """Get info about current recording session."""
+        return {
+            "is_recording": self.is_recording,
+            "sample_rate": getattr(self, "_recording_sr", 0),
+            "channels": getattr(self, "_recording_ch", 0),
+        }

@@ -77,6 +77,45 @@ class Sdl2Input:
         self._joystick = None
         self._joystick_id = -1
         self._event = SDL_Event()
+        # Hold tracking: button -> (frame_count, action, started_at)
+        self._held_buttons: dict[int, tuple[int, str, float]] = {}
+        self._hold_threshold = 30  # ~500ms at 60fps
+
+    def _check_hold(self, btn_id: int, logical_name: str) -> list[InputEvent]:
+        """Check if a button is being held and emit long_press events."""
+        events: list[InputEvent] = []
+        now = self._get_frame_time()
+        
+        if btn_id not in self._held_buttons:
+            self._held_buttons[btn_id] = (1, logical_name, now)
+            return events
+        
+        count, name, started = self._held_buttons[btn_id]
+        count += 1
+        self._held_buttons[btn_id] = (count, name, started)
+        
+        # Trigger long_press once when threshold is crossed
+        if count == self._hold_threshold:
+            events.append(InputEvent("button", name, "long_press", btn_id))
+        
+        return events
+
+    def _get_frame_time(self) -> float:
+        """Get monotonic time for hold tracking."""
+        return sdl2.SDL_GetTicks() / 1000.0
+
+    def _release_button(self, btn_id: int) -> list[InputEvent]:
+        """Clear hold tracking on button release."""
+        events: list[InputEvent] = []
+        if btn_id in self._held_buttons:
+            count, name, started = self._held_buttons[btn_id]
+            # If it was a long press, don't also emit a 'released'
+            if count >= self._hold_threshold:
+                events.append(InputEvent("button", name, "long_release", btn_id))
+            # Remove tracking
+            del self._held_buttons[btn_id]
+        return events
+
 
     def init(self) -> bool:
         if sdl2.SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_EVENTS) != 0:
@@ -144,12 +183,21 @@ class Sdl2Input:
                 name = _BUTTON_TO_NAME.get(("button", btn))
                 if name:
                     events.append(InputEvent("button", name, "pressed", btn))
+                    # Check for long-press
+                    events.extend(self._check_hold(btn, name))
                 else:
                     events.append(InputEvent("button", f"btn{btn}", "pressed", btn))
+                    events.extend(self._check_hold(btn, f"btn{btn}"))
 
             elif et == SDL_JOYBUTTONUP:
                 btn = ev.jbutton.button
                 name = _BUTTON_TO_NAME.get(("button", btn))
+                # Release handling for hold tracking
+                events.extend(self._release_button(btn))
+                # Only emit normal released if not a long-press
+                if name and btn not in getattr(self, '_held_buttons', {}):
+                    # Already handled by release
+                    pass
                 if name:
                     events.append(InputEvent("button", name, "released", btn))
 

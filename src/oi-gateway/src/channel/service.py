@@ -4,9 +4,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
-from .backend import AgentBackend, AgentBackendError, AgentResponse
+from .backend import AgentBackend, AgentBackendError, AgentResponse, AgentStreamChunk
 from .request_builder import (
     build_agent_request_from_text_prompt,
     build_agent_request_from_transcript,
@@ -181,6 +181,40 @@ class ChannelService:
 
         logger.info("Text prompt processed", extra={**log_context, "elapsed_ms": elapsed_ms})
 
+    async def _handle_streaming_request(self, request: AgentRequest, streaming_method) -> AgentResponse:
+        """Handle a streaming request, emitting delta events and returning final response."""
+        last_text = ""
+        last_final = False
+        async for chunk in streaming_method(request):
+            if not isinstance(chunk, AgentStreamChunk):
+                continue
+            if chunk.text_delta:
+                last_text = chunk.text_delta if chunk.is_final else last_text + chunk.text_delta
+                last_final = chunk.is_final
+                # Emit delta for real-time display on devices
+                self._event_bus.emit(
+                    "agent_response_delta",
+                    request.source_device_id,
+                    {
+                        "stream_id": request.stream_id,
+                        "text_delta": chunk.text_delta,
+                        "is_final": chunk.is_final,
+                        "device_context": request.device_context,
+                        "reply_constraints": request.reply_constraints,
+                        "backend_name": getattr(self._pi_backend, "name", "unknown"),
+                        "session_key": request.session_key,
+                        "correlation_id": request.correlation_id,
+                    },
+                )
+
+        # Return final response
+        return AgentResponse(
+            response_text=last_text,
+            backend_name=getattr(self._pi_backend, "name", "unknown"),
+            session_key=request.session_key,
+            correlation_id=request.correlation_id,
+        )
+
     def _build_prompt_message(self, transcript: str, device_context: dict[str, Any]) -> str:
         request = build_agent_request_from_transcript(
             device_id=str(device_context.get("source_device")),
@@ -199,6 +233,12 @@ class ChannelService:
         return render_text_prompt(request)
 
     async def _send_backend_request(self, request) -> AgentResponse:
+        """Send request to backend, using streaming if available."""
+        # First try streaming if available, otherwise fall back to non-streaming
+        streaming_method = getattr(self._pi_backend, "send_request_streaming", None)
+        if callable(streaming_method):
+            return await self._handle_streaming_request(request, streaming_method)
+
         send_request = getattr(self._pi_backend, "send_request", None)
         if callable(send_request):
             return await send_request(request)
@@ -224,7 +264,6 @@ class ChannelService:
             )
 
         raise AgentBackendError("backend does not implement send_request or send_prompt")
-
     def _build_device_context(self, source_device_id: str) -> dict[str, Any]:
         online_devices = self._registry.get_online_devices()
         foreground_device = self._registry.get_foreground_device()

@@ -6,12 +6,22 @@ import contextlib
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, AsyncGenerator
 
-from .backend import AgentBackend, AgentBackendError, AgentRequest, AgentResponse
+from .backend import AgentBackend, AgentBackendError, AgentRequest, AgentResponse, AgentStreamChunk
 from .request_builder import render_text_prompt
 
 logger = logging.getLogger(__name__)
+
+    async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
+        """Return a fixed streaming response without spawning a subprocess."""
+        self._last_message = render_text_prompt(request)
+        self._call_count += 1
+        yield AgentStreamChunk(
+            text_delta=self._response,
+            is_final=True,
+            metadata={"stub": True},
+        )
 
 
 class PiBackendError(AgentBackendError):
@@ -47,8 +57,9 @@ class SubprocessPiBackend(AgentBackend):
             correlation_id=request.correlation_id,
         )
 
-    async def send_prompt(self, message: str) -> str:
-        """Backward-compatible helper for tests and legacy callers."""
+
+    async def _read_events_from_prompt(self, message: str):
+        """Read events from pi subprocess as an async generator yielding AgentStreamChunk."""
         logger.debug(
             "starting pi subprocess prompt",
             extra={
@@ -72,14 +83,15 @@ class SubprocessPiBackend(AgentBackend):
         terminal_event_types = {"agent_end", "end", "completed", "response_end"}
         last_text: str | None = None
         responded = False
+        response_text = ""
 
         try:
             while True:
                 raw = await asyncio.wait_for(proc.stdout.readline(), timeout=self._timeout_seconds)
                 if not raw:
                     if last_text and last_text.strip():
-                        return last_text
-                    raise PiBackendError("pi closed stdout without usable response text")
+                        response_text = last_text
+                    break
 
                 line = raw.decode(errors="replace").strip()
                 if not line:
@@ -98,15 +110,34 @@ class SubprocessPiBackend(AgentBackend):
                 extracted = self._extract_text(event)
                 if extracted and extracted.strip():
                     last_text = extracted
+                    response_text = extracted
+                    is_final = event_type in terminal_event_types
+                    yield AgentStreamChunk(
+                        text_delta=extracted,
+                        is_final=is_final,
+                        metadata={"event_type": event_type} if event_type else {},
+                    )
 
                 if event_type in terminal_event_types:
                     event_text = self._extract_text(event)
                     if event_text and event_text.strip() and not responded:
                         responded = True
-                        return event_text
+                        response_text = event_text
+                        yield AgentStreamChunk(
+                            text_delta=event_text,
+                            is_final=True,
+                            metadata={"event_type": event_type},
+                        )
+                        break
                     if last_text and last_text.strip() and not responded:
                         responded = True
-                        return last_text
+                        response_text = last_text
+                        yield AgentStreamChunk(
+                            text_delta=last_text,
+                            is_final=True,
+                            metadata={"event_type": event_type},
+                        )
+                        break
                     continue
 
                 logger.debug("Ignoring non-terminal pi event type=%r", event_type)
@@ -123,6 +154,30 @@ class SubprocessPiBackend(AgentBackend):
                     proc.kill()
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
+
+        # If we never yielded anything but have text, yield it as final
+        if response_text and not responded:
+            yield AgentStreamChunk(
+                text_delta=response_text,
+                is_final=True,
+                metadata={"event_type": "complete"},
+            )
+
+    async def send_prompt(self, message: str) -> str:
+        """Backward-compatible helper for tests and legacy callers."""
+        last_text = None
+        async for chunk in self._read_events_from_prompt(message):
+            if chunk.text_delta and chunk.text_delta.strip():
+                last_text = chunk.text_delta
+        if last_text is None:
+            raise PiBackendError("pi subprocess returned no usable response text")
+        return last_text
+
+    async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
+        """Send a request and yield streaming text chunks."""
+        message = render_text_prompt(request)
+        async for chunk in self._read_events_from_prompt(message):
+            yield chunk
 
     def _extract_text(self, event: dict[str, Any]) -> str | None:
         event_type = event.get("type")

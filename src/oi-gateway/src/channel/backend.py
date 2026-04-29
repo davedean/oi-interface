@@ -47,3 +47,24 @@ class AgentBackend(Protocol):
 
     async def send_request(self, request: AgentRequest) -> AgentResponse:
         """Send a normalized request and return a normalized response."""
+
+
+@dataclass(frozen=True)
+class AgentStreamChunk:
+    """A chunk of streaming text from an agent backend."""
+
+    text_delta: str
+    is_final: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class StreamingAgentBackend(Protocol):
+    """Optional protocol for agent backends that support streaming responses."""
+
+    @property
+    def name(self) -> str:
+        """Return a stable backend name for logs and payloads."""
+
+    async def send_request_streaming(self, request: AgentRequest):
+        """Send a normalized request and yield streaming chunks."""
+        ...
