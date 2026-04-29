@@ -50,8 +50,9 @@ class TextDeliveryPipeline:
             return
 
         text_delta = payload.get("text_delta", "")
-        if not text_delta:
-            logger.debug("Skipping empty text_delta for device %s", device_id)
+        is_final = payload.get("is_final", False)
+        if not text_delta and not is_final:
+            logger.debug("Skipping empty non-final text_delta for device %s", device_id)
             return
 
         # Schedule async processing

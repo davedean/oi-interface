@@ -123,17 +123,22 @@ class SubprocessPiBackend(AgentBackend):
                     if event_text and event_text.strip() and not responded:
                         responded = True
                         response_text = event_text
+                        if event_text.startswith(sent_text):
+                            final_delta = event_text[len(sent_text):]
+                        else:
+                            final_delta = event_text
+                        sent_text = event_text
                         yield AgentStreamChunk(
-                            text_delta=event_text,
+                            text_delta=final_delta,
                             is_final=True,
                             metadata={"event_type": event_type},
                         )
                         break
-                    if last_text and last_text.strip() and not responded:
+                    if sent_text.strip() and not responded:
                         responded = True
-                        response_text = last_text
+                        response_text = sent_text
                         yield AgentStreamChunk(
-                            text_delta=last_text,
+                            text_delta="",
                             is_final=True,
                             metadata={"event_type": event_type},
                         )
@@ -172,13 +177,17 @@ class SubprocessPiBackend(AgentBackend):
 
     async def send_prompt(self, message: str) -> str:
         """Backward-compatible helper for tests and legacy callers."""
-        last_text = None
+        response_text = ""
+        got_any = False
         async for chunk in self._read_events_from_prompt(message):
-            if chunk.text_delta and chunk.text_delta.strip():
-                last_text = chunk.text_delta
-        if last_text is None:
+            if chunk.text_delta:
+                response_text += chunk.text_delta
+                got_any = True
+            if chunk.is_final and not chunk.text_delta:
+                got_any = True
+        if not got_any:
             raise PiBackendError("pi closed stdout without usable response text")
-        return last_text
+        return response_text
 
     async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
         """Send a request and yield streaming text chunks."""
