@@ -853,7 +853,7 @@ class CharacterRendererService:
             renderer = DeviceRenderer(pack)
             instruction = renderer.render(state.value, custom_label=label)
             cmd = instruction.to_datp_command(pack.pack_id, pack.target)
-            from ..datp.messages import build_command
+            from datp.messages import build_command
             msg = build_command(device_id, "character.set_state", cmd["args"])
             sent = await self._server.send_to_device(device_id, msg)
             if sent:
