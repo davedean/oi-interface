@@ -171,7 +171,8 @@ class ChannelService:
             },
         )
 
-        if self._command_dispatcher is not None:
+        # Only show card if streaming was NOT used (text was not already displayed via deltas)
+        if self._command_dispatcher is not None and not response.streaming_used:
             await self._command_dispatcher.show_card(
                 device_id,
                 title="Response",
@@ -185,12 +186,18 @@ class ChannelService:
         """Handle a streaming request, emitting delta events and returning final response."""
         last_text = ""
         last_final = False
+        chunk_count = 0
+        logger.info("Starting streaming request for device %s", request.source_device_id)
         async for chunk in streaming_method(request):
+            chunk_count += 1
             if not isinstance(chunk, AgentStreamChunk):
                 continue
             if chunk.text_delta:
                 last_text = chunk.text_delta if chunk.is_final else last_text + chunk.text_delta
                 last_final = chunk.is_final
+                logger.debug("Emitting delta: device=%s seq=%d final=%s text=%r", 
+                            request.source_device_id, chunk_count, chunk.is_final, 
+                            chunk.text_delta[:50] if chunk.text_delta else "")
                 # Emit delta for real-time display on devices
                 self._event_bus.emit(
                     "agent_response_delta",
@@ -207,12 +214,16 @@ class ChannelService:
                     },
                 )
 
+        logger.info("Streaming request completed: device=%s chunks=%d final_len=%d",
+                    request.source_device_id, chunk_count, len(last_text))
+        
         # Return final response
         return AgentResponse(
             response_text=last_text,
             backend_name=getattr(self._pi_backend, "name", "unknown"),
             session_key=request.session_key,
             correlation_id=request.correlation_id,
+            streaming_used=True,  # Mark that streaming was used
         )
 
     def _build_prompt_message(self, transcript: str, device_context: dict[str, Any]) -> str:

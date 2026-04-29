@@ -36,6 +36,7 @@ class AgentResponse:
     correlation_id: str | None = None
     raw_response: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    streaming_used: bool = False  # Track if streaming was used
 
 
 class AgentBackend(Protocol):

@@ -170,9 +170,7 @@ class Sdl2Renderer:
             self._draw_tex(tex, 26, 8, w, h)
             self._destroy_tex(tex)
 
-    def draw_card(self, title: str, body_lines: list[str], scroll_y: int = 0) -> None:
-        # Card background
-        card_x, card_y = 10, 42
+    def draw_card(self, title: str, body_lines: list[str], scroll_y: int = 0, card_y: int = 62) -> None:
         card_w = self.width - 20
         card_h = self.height - 90
         self._rect(card_x, card_y, card_w, card_h, RenderColors.card_bg)
@@ -189,17 +187,71 @@ class Sdl2Renderer:
             if y > card_y + card_h - 16:
                 break
             if y >= card_y + 30 and line:
-                tex, lw, lh = self._text(self._font_body, line, RenderColors.fg)
-                if tex:
-                    self._draw_tex(tex, card_x + 10, y, lw, lh)
-                    self._destroy_tex(tex)
+                # Wrap long lines to fit within card width
+                wrapped = self._wrap_text(line, self._font_body, card_w - 20)
+                for wline in wrapped:
+                    if y > card_y + card_h - 16:
+                        break
+                    tex, lw, lh = self._text(self._font_body, wline, RenderColors.fg)
+                    if tex:
+                        self._draw_tex(tex, card_x + 10, y, lw, lh)
+                        self._destroy_tex(tex)
+                    y += 18
+                # Wrapped lines handled, move to next line
+                continue
+            # Empty or whitespace-only line - preserve vertical spacing
             y += 18
 
-    def draw_hints(self, hints: str) -> None:
+    def _wrap_text(self, text: str, font, max_width: int) -> list[str]:
+        """Wrap a line of text to fit within max_width pixels."""
+        if not text or not text.strip():
+            return [text] if text else []
+        words = text.split(" ")
+        lines = []
+        current_line = []
+        
+        for word in words:
+            test_line = current_line + [word]
+            test_text = " ".join(test_line)
+            tex, w, h = self._text(font, test_text, RenderColors.fg)
+            if tex:
+                fits = w <= max_width
+                self._destroy_tex(tex)
+            else:
+                fits = False
+            
+            if fits:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(" ".join(current_line))
+                # Word itself might be too long - handle by splitting
+                if not fits and not current_line:
+                    # Force-add the word on its own line, even if it overflows
+                    lines.append(word)
+                    current_line = []
+                else:
+                    current_line = [word]
+        
+        if current_line:
+            lines.append(" ".join(current_line))
+        
+        return lines if lines else [text]
+
+    def draw_hints(self, hints: str, version: str = "") -> None:
         tex, w, h = self._text(self._font_hint, hints, RenderColors.dim)
         if tex:
             self._draw_tex(tex, 10, self.height - 22, w, h)
             self._destroy_tex(tex)
+        
+        # Draw version in bottom-right corner
+        if version:
+            tex2, w2, h2 = self._text(self._font_hint, version, RenderColors.dim)
+            # Also draw a subtle background for better visibility
+            self._rect(self.width - w2 - 14, self.height - 24, w2 + 8, h2 + 4, RenderColors.card_bg)
+            if tex2:
+                self._draw_tex(tex2, self.width - w2 - 10, self.height - 22, w2, h2)
+                self._destroy_tex(tex2)
 
     def draw_spinner(self, x: int, y: int, frame: int) -> None:
         """Draw a simple spinner animation at (x, y)."""

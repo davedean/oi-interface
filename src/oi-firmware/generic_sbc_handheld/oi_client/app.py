@@ -83,6 +83,54 @@ class HandheldApp:
         self._menu_idx = 0
         self._menu_items = ["Quit", "Reconnect"]
 
+        # Character display state (default to IDLE placeholder)
+        self._character_sprite: str | None = "idle"
+        self._character_label: str = "Waiting..."
+        self._character_animation: str | None = "idle"
+        self._character_overlay_sprite: str | None = None
+        self._character_overlay_label: str = ""
+        self._character_pack_id: str = ""
+
+        # Display version
+        self._version = self._get_version()
+
+    def _get_version(self) -> str:
+        """Get git commit hash for display."""
+        import subprocess
+        import os
+        
+        # Try multiple possible locations
+        possible_paths = [
+            "/home/dev/oi-interface",
+            "/home/dev/oi-interface/src/oi-firmware",
+            ".",
+            os.path.dirname(__file__) + "/../../../..",
+        ]
+        
+        for path in possible_paths:
+            try:
+                result = subprocess.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    cwd=path,
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()[:8]
+            except Exception:
+                continue
+        
+        # Fallback: read from a file if available
+        try:
+            with open("/etc/oi-version", "r") as f:
+                return f.read().strip()[:8]
+        except Exception:
+            pass
+        
+        return "dev"
+
+
     # ------------------------------------------------------------------
     # Init / Shutdown
     # ------------------------------------------------------------------
@@ -336,6 +384,14 @@ class HandheldApp:
             self._card_scroll = 0
             self._ui_mode = UIMode.CARD
 
+        elif op == "character.set_state":
+            self._character_sprite = args.get("sprite")
+            self._character_label = args.get("label", "")
+            self._character_animation = args.get("animation")
+            self._character_overlay_sprite = args.get("overlay")
+            self._character_overlay_label = args.get("overlay_label", "")
+            self._character_pack_id = args.get("pack_id", "")
+
         elif op == "audio.cache.put_begin":
             self._recording_stream_id = args.get("stream_id", f"stream_{uuid.uuid4().hex[:8]}")
             self._recording_chunks = []
@@ -392,6 +448,9 @@ class HandheldApp:
         title = "Oi — " + self._ui_mode.value.upper()
         self.renderer.draw_title(title, online=self._online)
 
+        # Character display (if available) - drawn between title bar and main content
+        self._draw_character()
+
         # Main content area based on mode
         if self._ui_mode == UIMode.CONNECTING:
             self.renderer.draw_card("Connecting", ["Attempting to reach oi-gateway..."], 0)
@@ -443,9 +502,42 @@ class HandheldApp:
         # Show recording indicator if actively capturing
         if self._ui_mode == UIMode.RECORDING:
             self.renderer.draw_recording_indicator()
-        self.renderer.draw_hints(hints)
+        self.renderer.draw_hints(hints, self._version)
 
         self.renderer.present()
+
+    def _draw_character(self) -> None:
+        """Draw character state if available."""
+        if not self._character_sprite:
+            return
+        # Render character label in the top area below title bar
+        try:
+            from sdl2 import sdl2
+            from oi_client.renderer import RenderColors
+            # Draw a small character preview box
+            box_x, box_y = 10, 34
+            box_w, box_h = 100, 26
+            # Background for character display
+            color = RenderColors.card_bg
+            self.renderer._rect(box_x, box_y, box_w, box_h, color)
+            
+            # Draw pulsing dot animation for idle state
+            if self._character_animation and self._character_animation in ("idle", "breathe", "pulse"):
+                frame = int(time.time() * 3) % 3
+                dot_x = box_x + box_w - 16 + (frame * 3)
+                dot_y = box_y + box_h // 2 - 3
+                # Pulsing dot (green for online/active feel)
+                self.renderer._rect(dot_x, dot_y, 6, 6, RenderColors.online)
+            
+            # Draw character label
+            if self._character_label:
+                label_text = self._character_label[:14] + ("…" if len(self._character_label) > 14 else "")
+                tex, w, h = self.renderer._text(self.renderer._font_hint, label_text, RenderColors.accent)
+                if tex:
+                    self.renderer._draw_tex(tex, box_x + 6, box_y + 4, w, h)
+                    self.renderer._destroy_tex(tex)
+        except Exception:
+            pass
 
     def _hint_for_mode(self) -> str:
         if self._ui_mode == UIMode.CARD:

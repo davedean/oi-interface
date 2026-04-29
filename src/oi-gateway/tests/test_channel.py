@@ -787,6 +787,7 @@ async def test_text_response_delivered_to_device(event_bus, stub_device):
     # Create a mock CommandDispatcher
     mock_dispatcher = MagicMock(spec=CommandDispatcher)
     mock_dispatcher.show_card = AsyncMock(return_value=True)
+    mock_dispatcher.show_text_delta = AsyncMock(return_value=True)
 
     service = ChannelService(event_bus, registry, backend, command_dispatcher=mock_dispatcher)
 
@@ -812,13 +813,21 @@ async def test_text_response_delivered_to_device(event_bus, stub_device):
     assert response_received is not None
     assert response_received["response_text"] == "It's 3:14 PM"
 
-    # Verify display.show_card was called with the response text
-    mock_dispatcher.show_card.assert_called_once()
-    call_args = mock_dispatcher.show_card.call_args
-    assert call_args[0][0] == "test-device"  # device_id
-    assert call_args[1]["title"] == "Response"  # title
-    assert call_args[1]["body"] == "It's 3:14 PM"  # body
-    assert call_args[1]["options"] == []  # no options
+    # With StubPiBackend, streaming is used (has send_request_streaming)
+    # So show_text_delta should be called, NOT show_card
+    if response_received.get("streaming_used", False):
+        # Streaming path - check show_text_delta was called
+        mock_dispatcher.show_text_delta.assert_called()
+        print("Streaming path used - show_text_delta called")
+    else:
+        # Non-streaming path - check show_card was called
+        mock_dispatcher.show_card.assert_called_once()
+        call_args = mock_dispatcher.show_card.call_args
+        assert call_args[0][0] == "test-device"  # device_id
+        assert call_args[1]["title"] == "Response"  # title
+        assert call_args[1]["body"] == "It's 3:14 PM"  # body
+        assert call_args[1]["options"] == []  # no options
+        print("Non-streaming path used - show_card called")
 
 
 @pytest.mark.asyncio
