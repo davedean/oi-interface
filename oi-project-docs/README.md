@@ -56,16 +56,6 @@ docs/
     mcp.md
     home-assistant.md
     open-interpreter-01.md
-  plans/
-    half-day-mvp.md
-    phased-roadmap.md
-    implementation-plan.md
-    2030-moonshot.md
-  ops/
-    observability.md
-    testing.md
-    deployment.md
-    secrets.md
   product/
     positioning.md
     user-stories.md
@@ -73,6 +63,7 @@ docs/
   adr/
     0001-one-mind-many-bodies.md
     0002-device-owns-embodiment.md
+  internal/        ← planning, ops, and reference notes
 examples/
   datp-session.jsonl
   device-registry.json
@@ -114,7 +105,8 @@ Read:
 2. `docs/architecture/system-overview.md`
 3. `docs/specs/human-interaction-spec.md`
 4. `docs/specs/datp-wire-protocol.md`
-5. `docs/plans/half-day-mvp.md`
+
+Internal planning, ops, and draft notes live under `docs/internal/` and are excluded from the public index.
 
 # Oi rename and strategic update
 

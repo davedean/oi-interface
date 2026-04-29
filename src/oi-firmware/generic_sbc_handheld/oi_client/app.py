@@ -7,6 +7,7 @@ Ties together SDL2 input, renderer, audio, and DATP client.
 from __future__ import annotations
 
 import asyncio
+import glob
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -125,6 +126,12 @@ class HandheldApp:
         if self.datp:
             await self.datp.disconnect()
             self.datp = None
+        # Clean up temp audio files
+        for f in glob.glob("/tmp/oi_audio_*.wav"):
+            try:
+                os.unlink(f)
+            except Exception:
+                pass
         self.renderer.shutdown()
         self.input.shutdown()
 
@@ -209,7 +216,7 @@ class HandheldApp:
             self._menu_idx = 0
             return
 
-        if self._ui_mode == UIMode.HOME:
+        if self._ui_mode in (UIMode.HOME, UIMode.READY):
             if ev.name == "a":
                 # Send selected prompt
                 prompt = CANNED_PROMPTS[self._prompt_idx]
@@ -270,6 +277,8 @@ class HandheldApp:
         if not self.datp or not self.datp.is_connected:
             self._ui_mode = UIMode.OFFLINE
             return
+        # Clear previous response before sending new prompt
+        self._card = CardData(title="Oi", body="")
         self._ui_mode = UIMode.WAITING
         await self.datp.send_text_prompt(text)
 
@@ -306,6 +315,12 @@ class HandheldApp:
 
         elif op == "audio.cache.put_end":
             if self._audio_buffer:
+                # Clean up old temp audio files before creating new one
+                for f in glob.glob("/tmp/oi_audio_*.wav"):
+                    try:
+                        os.unlink(f)
+                    except Exception:
+                        pass
                 wav = self.audio.save_wav(bytes(self._audio_buffer))
                 self.audio.play(wav)
                 self._audio_buffer = bytearray()

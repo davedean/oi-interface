@@ -169,6 +169,9 @@ class DatpClient:
             except InvalidTransition:
                 pass
             self._received_commands.append(payload)
+            # Prevent unbounded growth - keep last 100 commands
+            if len(self._received_commands) > 100:
+                self._received_commands = self._received_commands[-100:]
             await self._ack(msg.get("id", ""))
             await self._cmd_queue.put(payload)
 
@@ -222,7 +225,7 @@ class DatpClient:
         await self._send("event", {"event": event_type, "button": button})
 
     async def send_text_prompt(self, text: str) -> None:
-        await self._send("event", {"event": "text.prompt", "text": text})
+        await self._send("event", {"event": "text.prompt", "text": text, "nonce": secrets.token_hex(8)})
 
     async def send_state_report(self) -> None:
         await self._send("state", {

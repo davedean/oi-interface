@@ -1,7 +1,6 @@
 # Index
 
 - `README.md`
-- `docs/00-vision-oi-update.md`
 - `docs/00-vision.md`
 - `docs/01-design-principles.md`
 - `docs/02-glossary.md`
@@ -24,20 +23,11 @@
 - `docs/integrations/mcp.md`
 - `docs/integrations/open-interpreter-01.md`
 - `docs/integrations/openclaw.md`
-- `docs/ops/deployment.md`
-- `docs/ops/observability.md`
-- `docs/ops/secrets.md`
-- `docs/ops/testing.md`
-- `docs/plans/2030-moonshot.md`
-- `docs/plans/half-day-mvp.md`
-- `docs/plans/implementation-plan.md`
-- `docs/plans/phased-roadmap.md`
 - `docs/product/apple-ecosystem.md`
 - `docs/product/design-language.md`
 - `docs/product/hosted-oi-gateway.md`
 - `docs/product/positioning.md`
 - `docs/product/user-stories.md`
-- `docs/references.md`
 - `docs/specs/application-protocol.md`
 - `docs/specs/character-status-spec.md`
 - `docs/specs/datp-wire-protocol.md`

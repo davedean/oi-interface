@@ -91,8 +91,8 @@ Primary device: [M5Stack StickS3](https://docs.m5stack.com/en/core/M5StickS3) (E
 | [`src/oi-gateway/hermes.env.example`](src/oi-gateway/hermes.env.example) | Hermes backend env template |
 | [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md) | OpenClaw backend setup and local env wiring |
 | [`src/oi-gateway/openclaw.env.example`](src/oi-gateway/openclaw.env.example) | Example env file for the OpenClaw backend |
-| [`oi-project-docs/docs/specs/`](oi-project-docs/docs/specs/) | Wire protocol specs (DATP, Oi Channel, etc.) |
-| [`oi-project-docs/docs/plans/half-day-mvp.md`](oi-project-docs/docs/plans/half-day-mvp.md) | First demo target |
+| [`oi-project-docs/docs/specs/`](oi-project-docs/docs/specs/) | Public wire protocol specs (DATP, Oi Channel, etc.) |
+| [`oi-project-docs/docs/internal/`](oi-project-docs/docs/internal/) | Internal planning and ops docs |
 | [`oi-v1/README.md`](oi-v1/README.md) | v1 codebase overview |
 
 ## Getting Started
