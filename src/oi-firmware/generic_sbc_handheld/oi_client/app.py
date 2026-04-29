@@ -474,6 +474,7 @@ class HandheldApp:
 
     def _draw_frame(self) -> None:
         self.renderer.clear()
+        blob = self._ascii_blob_lines()
 
         # Title bar with connection status
         title = "Oi — " + self._ui_mode.value.upper()
@@ -484,12 +485,12 @@ class HandheldApp:
 
         # Main content area based on mode
         if self._ui_mode == UIMode.CONNECTING:
-            self.renderer.draw_card("Connecting", ["Attempting to reach oi-gateway..."], 0)
+            self.renderer.draw_card("Connecting", ["Attempting to reach oi-gateway..."], 0, ascii_bg_lines=blob)
             self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
 
         elif self._ui_mode == UIMode.READY or self._ui_mode == UIMode.HOME:
             lines = ["Select a prompt:"] + [f"  {'>' if i == self._prompt_idx else ' '} {p}" for i, p in enumerate(CANNED_PROMPTS)]
-            self.renderer.draw_card("Home", lines, 0)
+            self.renderer.draw_card("Home", lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.WAITING:
             # While waiting, show live progress and keep newest entries on screen.
@@ -500,19 +501,19 @@ class HandheldApp:
                     waiting_lines = body_lines
             progress_body = "\n".join(waiting_lines)
             self._progress_scroll = self._max_card_scroll("Waiting", progress_body)
-            self.renderer.draw_card("Waiting", waiting_lines, self._progress_scroll)
+            self.renderer.draw_card("Waiting", waiting_lines, self._progress_scroll, ascii_bg_lines=blob)
             self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
 
         elif self._ui_mode == UIMode.CARD:
             body_lines = self._card.body.split("\n")
-            self.renderer.draw_card(self._card.title, body_lines, self._card_scroll)
+            self.renderer.draw_card(self._card.title, body_lines, self._card_scroll, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.MENU:
             lines = []
             for i, item in enumerate(self._menu_items):
                 marker = "> " if i == self._menu_idx else "  "
                 lines.append(f"{marker}{item}")
-            self.renderer.draw_card("Menu", lines, 0)
+            self.renderer.draw_card("Menu", lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.ERROR:
             url = getattr(self, 'gateway_url', '?')
@@ -523,7 +524,7 @@ class HandheldApp:
                 "",
                 "A: Retry  B: Quit",
             ]
-            self.renderer.draw_card("Error", body_lines, 0)
+            self.renderer.draw_card("Error", body_lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.OFFLINE:
             url = getattr(self, 'gateway_url', '?')
@@ -534,7 +535,7 @@ class HandheldApp:
                 "",
                 "A: Retry  B: Quit",
             ]
-            self.renderer.draw_card("Offline", body_lines, 0)
+            self.renderer.draw_card("Offline", body_lines, 0, ascii_bg_lines=blob)
 
         # Bottom hints
         hints = self._hint_for_mode()
@@ -544,6 +545,30 @@ class HandheldApp:
         self.renderer.draw_hints(hints, self._version)
 
         self.renderer.present()
+
+    def _ascii_blob_lines(self) -> list[str]:
+        """Return an animated ASCII blob based on current UI mode/state."""
+        import time
+        blink = int(time.time() * 1.2) % 8 == 0
+        step = int(time.time() * 3) % 2
+
+        eye = "- -" if blink else "o o"
+        mouth = "_" if self._ui_mode in (UIMode.READY, UIMode.HOME, UIMode.CARD) else "o"
+        if self._ui_mode in (UIMode.ERROR, UIMode.OFFLINE):
+            mouth = "~"
+        if self._ui_mode == UIMode.WAITING:
+            mouth = "."
+
+        arm_l = "<" if step == 0 else "("
+        arm_r = ">" if step == 0 else ")"
+
+        return [
+            "   .-''''-.   ",
+            f"  /  {eye}  \\  ",
+            f" |    {mouth}    | ",
+            f"  \\  ____  /  ",
+            f"   {arm_l}____{arm_r}   ",
+        ]
 
     def _draw_character(self) -> None:
         """Draw character state if available."""

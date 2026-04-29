@@ -172,11 +172,22 @@ class Sdl2Renderer:
             self._draw_tex(tex, 26, 8, w, h)
             self._destroy_tex(tex)
 
-    def draw_card(self, title: str, body_lines: list[str], scroll_y: int = 0, card_y: int = 62) -> None:
+    def draw_card(self, title: str, body_lines: list[str], scroll_y: int = 0, card_y: int = 62, ascii_bg_lines: list[str] | None = None) -> None:
         card_x, card_y = 10, card_y
         card_w = self.width - 20
         card_h = self.height - 90
         self._rect(card_x, card_y, card_w, card_h, RenderColors.card_bg)
+
+        # Optional large ASCII background character (dimmed/watermark style)
+        if ascii_bg_lines:
+            ay = card_y + 42
+            ax = card_x + max(10, card_w - 220)
+            for line in ascii_bg_lines:
+                tex, lw, lh = self._text(self._font_body, line, RenderColors.dim)
+                if tex:
+                    self._draw_tex(tex, ax, ay, lw, lh)
+                    self._destroy_tex(tex)
+                ay += 18
 
         # Card title
         tex, w, h = self._text(self._font_title, title, RenderColors.accent)
