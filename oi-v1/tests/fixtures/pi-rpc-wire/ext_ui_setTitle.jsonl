@@ -1,0 +1,2 @@
+{"comment": "server sends extension UI setTitle, no response expected"}
+{"emit": {"type": "extension_ui_request", "id": "req-1", "method": "setTitle", "title": "pi - my project"}}

@@ -1,0 +1,3 @@
+{"comment": "client sets steering mode, server acknowledges"}
+{"expect": {"type": "set_steering_mode", "id": "<echo>", "mode": "one-at-a-time"}}
+{"emit": {"type": "response", "command": "set_steering_mode", "id": "<echo>", "success": true}}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DATP Event",
+  "type": "object",
+  "required": [
+    "v",
+    "type",
+    "id",
+    "device_id",
+    "payload"
+  ],
+  "properties": {
+    "v": {
+      "const": "datp/0.1"
+    },
+    "type": {
+      "enum": [
+        "event",
+        "state",
+        "audio_chunk",
+        "hello",
+        "ack",
+        "error"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "device_id": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}

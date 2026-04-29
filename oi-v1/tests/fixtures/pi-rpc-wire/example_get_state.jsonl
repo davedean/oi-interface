@@ -1,0 +1,3 @@
+{"comment": "client requests session state, server responds with success and session data"}
+{"expect": {"type": "get_state", "id": "<echo>"}}
+{"emit":   {"type": "response", "command": "get_state", "id": "<echo>", "success": true, "data": {"sessionId": "s1", "sessionName": "demo", "isStreaming": false, "pendingMessageCount": 0}}}

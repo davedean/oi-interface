@@ -1,0 +1,3 @@
+{"comment": "client aborts an in-progress retry, server acknowledges"}
+{"expect": {"type": "abort_retry", "id": "<echo>"}}
+{"emit": {"type": "response", "command": "abort_retry", "id": "<echo>", "success": true}}

@@ -1,0 +1,3 @@
+{"comment": "client starts a fresh session, server acknowledges"}
+{"expect": {"type": "new_session", "id": "<echo>"}}
+{"emit": {"type": "response", "command": "new_session", "id": "<echo>", "success": true, "data": {"cancelled": false}}}

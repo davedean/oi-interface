@@ -1,0 +1,45 @@
+{
+  "device_hello": {
+    "type": "hello",
+    "device_id": "oi-stick-001",
+    "device_type": "oi-stick",
+    "protocol": "oi-device/0.1",
+    "firmware": "oi-stick-fw/0.1.0",
+    "capabilities": {
+      "input": [
+        "hold_to_record",
+        "double_tap",
+        "button_confirm"
+      ],
+      "output": [
+        "tiny_screen",
+        "cached_audio",
+        "character"
+      ],
+      "sensors": [
+        "battery",
+        "wifi_rssi"
+      ]
+    }
+  },
+  "server_hello_ack": {
+    "type": "hello_ack",
+    "server_id": "oi-home",
+    "server_name": "Home Oi",
+    "default_agent": {
+      "id": "chief",
+      "name": "Oi",
+      "role": "primary"
+    },
+    "server_capabilities": {
+      "stt": [
+        "whisper_local"
+      ],
+      "tts": [
+        "piper_local"
+      ],
+      "routing": true,
+      "task_ledger": true
+    }
+  }
+}

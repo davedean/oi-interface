@@ -1,0 +1,2 @@
+{"comment": "server emits tool_execution_start event"}
+{"emit": {"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {}}}

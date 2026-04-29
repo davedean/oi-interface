@@ -1,0 +1,3 @@
+{"comment": "client forks from a previous entry, server responds with forked message text"}
+{"expect": {"type": "fork", "id": "<echo>", "entryId": "entry-1"}}
+{"emit": {"type": "response", "command": "fork", "id": "<echo>", "success": true, "data": {"text": "What is 2+2?", "cancelled": false}}}

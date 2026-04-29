@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "source": "@mariozechner/pi-coding-agent docs/rpc.md",
+  "spec_path_hint": "<pi-coding-agent-install>/docs/rpc.md",
+  "_doc": "Canonical inventory of the Pi RPC protocol. Drift detector compares this to spec headings; set-coverage tests compare implementations to this. Update this file when spec drifts and add corresponding builders/projections.",
+
+  "commands": [
+    {"name": "prompt",                   "slice": "3c", "spec_lines": [42, 78]},
+    {"name": "steer",                    "slice": "3c", "spec_lines": [79, 100]},
+    {"name": "follow_up",                "slice": "3c", "spec_lines": [101, 122]},
+    {"name": "abort",                    "slice": "3c", "spec_lines": [123, 135]},
+    {"name": "new_session",              "slice": "3c", "spec_lines": [136, 160]},
+    {"name": "get_state",                "slice": "3a", "spec_lines": [161, 193]},
+    {"name": "get_messages",             "slice": "3a", "spec_lines": [194, 215]},
+    {"name": "set_model",                "slice": "3b", "spec_lines": [216, 233]},
+    {"name": "cycle_model",              "slice": "3b", "spec_lines": [234, 257]},
+    {"name": "get_available_models",     "slice": "3a", "spec_lines": [258, 279]},
+    {"name": "set_thinking_level",       "slice": "3b", "spec_lines": [280, 296]},
+    {"name": "cycle_thinking_level",     "slice": "3b", "spec_lines": [297, 316]},
+    {"name": "set_steering_mode",        "slice": "3b", "spec_lines": [317, 333]},
+    {"name": "set_follow_up_mode",       "slice": "3b", "spec_lines": [334, 352]},
+    {"name": "compact",                  "slice": "3d", "spec_lines": [353, 380]},
+    {"name": "set_auto_compaction",      "slice": "3b", "spec_lines": [381, 395]},
+    {"name": "set_auto_retry",           "slice": "3b", "spec_lines": [396, 408]},
+    {"name": "abort_retry",              "slice": "3c", "spec_lines": [409, 423]},
+    {"name": "bash",                     "slice": "3d", "spec_lines": [424, 481]},
+    {"name": "abort_bash",               "slice": "3c", "spec_lines": [482, 496]},
+    {"name": "get_session_stats",       "slice": "3a", "spec_lines": [497, 539]},
+    {"name": "export_html",              "slice": "3d", "spec_lines": [540, 562]},
+    {"name": "switch_session",           "slice": "3c", "spec_lines": [563, 580]},
+    {"name": "fork",                     "slice": "3d", "spec_lines": [581, 608]},
+    {"name": "clone",                    "slice": "3d", "spec_lines": [609, 636]},
+    {"name": "get_fork_messages",        "slice": "3a", "spec_lines": [637, 659]},
+    {"name": "get_last_assistant_text",  "slice": "3a", "spec_lines": [660, 679]},
+    {"name": "set_session_name",         "slice": "3b", "spec_lines": [680, 698]},
+    {"name": "get_commands",             "slice": "3a", "spec_lines": [699, 739]}
+  ],
+
+  "events": [
+    {"name": "agent_start",            "spec_lines": [765, 772]},
+    {"name": "agent_end",              "spec_lines": [773, 783]},
+    {"name": "turn_start",             "spec_lines": [784, 798]},
+    {"name": "turn_end",               "spec_lines": [784, 798]},
+    {"name": "message_start",          "spec_lines": [800, 808]},
+    {"name": "message_update",         "spec_lines": [809, 850]},
+    {"name": "message_end",            "spec_lines": [800, 808]},
+    {"name": "tool_execution_start",   "spec_lines": [851, 895]},
+    {"name": "tool_execution_update",  "spec_lines": [851, 895]},
+    {"name": "tool_execution_end",     "spec_lines": [851, 895]},
+    {"name": "queue_update",           "spec_lines": [896, 907]},
+    {"name": "compaction_start",       "spec_lines": [908, 938]},
+    {"name": "compaction_end",         "spec_lines": [908, 938]},
+    {"name": "auto_retry_start",       "spec_lines": [939, 970]},
+    {"name": "auto_retry_end",         "spec_lines": [939, 970]},
+    {"name": "extension_error",        "spec_lines": [971, 983]}
+  ],
+
+  "ui_methods": {
+    "dialog": [
+      {"name": "select",   "spec_lines": [1011, 1027], "response": "value_or_cancelled"},
+      {"name": "confirm",  "spec_lines": [1028, 1044], "response": "confirmed_or_cancelled"},
+      {"name": "input",    "spec_lines": [1045, 1060], "response": "value_or_cancelled"},
+      {"name": "editor",   "spec_lines": [1061, 1076], "response": "value_or_cancelled"}
+    ],
+    "fire_and_forget": [
+      {"name": "notify",          "spec_lines": [1077, 1092]},
+      {"name": "setStatus",       "spec_lines": [1093, 1108]},
+      {"name": "setWidget",       "spec_lines": [1109, 1125]},
+      {"name": "setTitle",        "spec_lines": [1126, 1138]},
+      {"name": "set_editor_text", "spec_lines": [1139, 1151]}
+    ]
+  },
+
+  "ui_response_shapes": {
+    "value_or_cancelled":     {"required_one_of": ["value", "cancelled"]},
+    "confirmed_or_cancelled": {"required_one_of": ["confirmed", "cancelled"]}
+  },
+
+  "casing_notes": [
+    "setStatus / setWidget / setTitle are camelCase",
+    "set_editor_text is snake_case",
+    "Do not normalize: dispatch must match exact strings"
+  ],
+
+  "behavioral_contracts": {
+    "prompt": [
+      "If agent is streaming and streamingBehavior is omitted, server returns success: false",
+      "streamingBehavior values: 'steer' or 'followUp'",
+      "Optional images: ImageContent[] with { type: 'image', data, mimeType }"
+    ],
+    "steer": [
+      "Extension commands (/foo) are NOT allowed; server rejects",
+      "Skill commands and prompt templates are expanded server-side"
+    ],
+    "fork": [
+      "Can be cancelled by session_before_fork extension event",
+      "Returns text of message being forked from on success"
+    ],
+    "clone": [
+      "Can be cancelled by session_before_fork extension event"
+    ],
+    "bash": [
+      "Streams via tool_execution_start / _update / _end events",
+      "abort_bash terminates mid-stream"
+    ],
+    "compact": [
+      "Streams via compaction_start / compaction_end events",
+      "Cancel mid-flight semantics in spec"
+    ],
+    "all_commands": [
+      "Optional id field for request/response correlation",
+      "Response includes echoed id when provided"
+    ]
+  }
+}

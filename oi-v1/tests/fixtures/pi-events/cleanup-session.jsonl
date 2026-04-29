@@ -1,0 +1,8 @@
+{"type":"snapshot","data":{"sessions":{"active_session_id":"s1","list":[{"session_id":"s1","name":"alpha","status":"waiting","pending_count":2,"stale":false,"last_seen_age_s":0},{"session_id":"s2","name":"beta","status":"idle","pending_count":0,"stale":false,"last_seen_age_s":5}]},"prompts":[{"prompt_id":"p-1","session_id":"s1","title":"Approve tool?","body":"allow bash","options":[{"label":"Approve","value":"approve"},{"label":"Deny","value":"deny"}],"status":"pending"},{"prompt_id":"p-2","session_id":"s1","title":"Continue?","body":"resume","options":[{"label":"OK","value":"ok"}],"status":"pending"}],"queued_commands":[{"command_id":"c-1","session_id":"s1","verb":"status","status":"queued"},{"command_id":"c-2","session_id":"s1","verb":"follow_up","status":"queued"}]}}
+{"type":"expect","data":{"view":"prompt","prompt":{"pending":true,"prompt_id":"p-1"},"sessions":{"list":[{"session_id":"s1","pending_count":2}]}}}
+{"type":"action","name":"session.cleanup","data":{"session_id":"s1"}}
+{"type":"expect","data":{"view":"idle","prompt":{"pending":false},"prompts":[],"queued_commands":[],"sessions":{"list":[{"session_id":"s1","pending_count":0}]},"last_action_result":{"ok":true,"code":"session_cleanup"}}}
+{"type":"action","name":"session.cleanup","data":{"session_id":"s2"}}
+{"type":"expect","data":{"last_action_result":{"ok":true,"code":"session_cleanup"}}}
+{"type":"action","name":"session.cleanup","data":{"dry_run":true}}
+{"type":"expect","data":{"last_action_result":{"ok":true,"code":"session_cleanup_dry_run"}}}

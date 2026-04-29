@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# pi-oi-mock — Launch the OI mock-device interactive frontend
+#
+# This script runs the TypeScript mock-device in interactive mode using
+# the locally-installed tsx runtime. Any extra arguments are passed
+# through to the mock-device CLI.
+#
+# Usage:
+#   ./scripts/pi-oi-mock                                         # start with initial state
+#   ./scripts/pi-oi-mock --fixture tests/fixtures/pi-events/multi-session-switch.jsonl
+#   ./scripts/pi-oi-mock --pi-rpc                                # start in Pi RPC mode
+#   ./scripts/pi-oi-mock --pi-rpc --pi-rpc-cmd "pi --mode rpc --no-session"
+#   echo "q" | ./scripts/pi-oi-mock --fixture tests/fixtures/pi-events/no-sessions.jsonl
+#   cat tests/fixtures/pi-events/no-sessions.jsonl | ./scripts/pi-oi-mock --stdin  # non-interactive
+#
+# For a smoke test (exit immediately):
+#   echo "q" | ./scripts/pi-oi-mock --fixture tests/fixtures/pi-events/multi-session-switch.jsonl
+#   printf 'q\n' | ./scripts/pi-oi-mock --pi-rpc
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+exec npx tsx mock-device/src/main.ts --interactive "$@"

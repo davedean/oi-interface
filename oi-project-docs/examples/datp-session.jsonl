@@ -1,0 +1,7 @@
+{"v":"datp/0.1","type":"hello","id":"msg_001","device_id":"stick-pocket","ts":"2026-04-27T04:40:00Z","payload":{"firmware":"agent-stick-fw/0.3.0","capabilities_hash":"sha256:example"}}
+{"v":"datp/0.1","type":"hello_ack","id":"msg_002","device_id":"stick-pocket","ts":"2026-04-27T04:40:01Z","payload":{"session_id":"sess_abc","accepted_protocol":"datp/0.1","send_capabilities":true}}
+{"v":"datp/0.1","type":"event","id":"evt_100","device_id":"stick-pocket","ts":"2026-04-27T04:41:00Z","payload":{"event":"button.long_hold_started","button":"main"}}
+{"v":"datp/0.1","type":"state","id":"state_100","device_id":"stick-pocket","ts":"2026-04-27T04:41:00Z","payload":{"mode":"RECORDING","battery_percent":71,"wifi_rssi":-67}}
+{"v":"datp/0.1","type":"event","id":"evt_101","device_id":"stick-pocket","ts":"2026-04-27T04:41:04Z","payload":{"event":"audio.recording_finished","stream_id":"rec_42","duration_ms":4310}}
+{"v":"datp/0.1","type":"command","id":"cmd_500","device_id":"stick-pocket","ts":"2026-04-27T04:41:05Z","payload":{"op":"display.show_status","args":{"state":"thinking","label":"Thinking"}}}
+{"v":"datp/0.1","type":"ack","id":"ack_500","device_id":"stick-pocket","ts":"2026-04-27T04:41:05Z","payload":{"command_id":"cmd_500","ok":true}}

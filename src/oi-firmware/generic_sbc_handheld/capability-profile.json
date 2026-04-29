@@ -1,0 +1,25 @@
+{
+  "device_type": "sbc-handheld",
+  "capabilities": {
+    "input": [
+      "buttons",
+      "dpad",
+      "hold_to_record",
+      "confirm_buttons"
+    ],
+    "display_width": 24,
+    "display_height": 8,
+    "has_audio_input": true,
+    "has_audio_output": true,
+    "supports_text_input": false,
+    "supports_confirm_buttons": true,
+    "supports_scrolling_cards": true,
+    "supports_voice": true,
+    "max_spoken_duration_s": 120
+  },
+  "notes": {
+    "plain_english": "This is the optimistic generic handheld profile. Real devices can downgrade these fields at runtime if, for example, no USB mic is attached.",
+    "audio_input_policy": "Set has_audio_input=false when no microphone is detected.",
+    "rendering_policy": "Tune display_width/display_height based on actual renderer and screen readability."
+  }
+}

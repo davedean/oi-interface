@@ -1,0 +1,5 @@
+{"type":"snapshot","data":{"sessions":{"active_session_id":"s1","list":[{"session_id":"s1","name":"alpha","status":"idle","pending_count":0,"stale":false,"last_seen_age_s":0}]},"prompts":[],"queue_health":{"oldest_pending_prompt_age_s":null,"oldest_queued_command_age_s":null},"queued_commands":[]}}
+{"type":"action","name":"command.queue","data":{"session_id":"s1","verb":"status","command_id":"c-1","request_id":"r-1"}}
+{"type":"expect","data":{"last_action_result":{"ok":true,"code":"command_queued"},"queued_commands":[{"command_id":"c-1","session_id":"s1","verb":"status","status":"queued"}]}}
+{"type":"event","name":"command.acked","data":{"command_id":"c-1"}}
+{"type":"expect","data":{"last_action_result":{"ok":true,"code":"command_acked"},"queued_commands":[{"command_id":"c-1","status":"acked"}]}}

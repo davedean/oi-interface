@@ -1,0 +1,2 @@
+{"comment": "server emits extension_error event"}
+{"emit": {"type": "extension_error", "extensionPath": "/path/to/test-ext.ts", "event": "tool_call", "error": "Something went wrong"}}

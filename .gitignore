@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Node / TypeScript
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+coverage/
+
+# Secrets & credentials — never commit these
+.env
+.env.*
+*.env.local
+secrets.py
+src/oi-fw/firmware/secrets.py
+*.key
+*.pem
+*.p12
+
+# Runtime state & databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.run/
+src/*/.run/
+src/*/state/
+src/*/data/
+
+# Audio — recordings and cached responses can be large
+*.wav
+*.mp3
+*.ogg
+# Exception: keep fixture audio if checked in deliberately
+!src/oi-sim/fixtures/audio/*.wav
+
+# Logs
+*.log
+logs/
+src/*/logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local harness / nested repos
+.codex
+other-repos/

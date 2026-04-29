@@ -1,0 +1,3 @@
+{"comment": "server requests extension UI select, client responds with choice"}
+{"emit": {"type": "extension_ui_request", "id": "req-1", "method": "select", "title": "Pick one", "options": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}]}}
+{"expect": {"type": "extension_ui_response", "id": "req-1", "value": "a"}}

@@ -1,0 +1,2 @@
+{"type":"snapshot","data":{"sessions":{"active_session_id":null,"list":[]},"prompts":[],"queue_health":{"oldest_pending_prompt_age_s":null,"oldest_queued_command_age_s":null},"queued_commands":[]}}
+{"type":"expect","data":{"view":"idle","sessions":{"active_session_id":null,"list":[]},"prompt":{"pending":false},"queued_commands":[]}}
