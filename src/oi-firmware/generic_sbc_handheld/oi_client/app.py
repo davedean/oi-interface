@@ -263,6 +263,8 @@ class HandheldApp:
             stream_id = f"rec_{int(self._recording_start_time * 1000)}"
             # We don't track seq here since chunking is coarse
             await self.datp.send_audio_chunk(stream_id, 0, chunk, 16000)
+            self._card.title = "Recording"
+            self._card.body = f"Streaming audio… {len(chunk)} bytes"
 
     # ------------------------------------------------------------------
     # Input handling
@@ -271,6 +273,14 @@ class HandheldApp:
     async def _handle_input(self, ev: InputEvent) -> None:
         if ev.type == "quit":
             self._running = False
+            return
+
+        # Handle long-press recording controls before generic pressed gating.
+        if ev.name == "a" and ev.action == "long_press" and self._ui_mode in (UIMode.HOME, UIMode.READY):
+            await self.start_recording()
+            return
+        if ev.name == "a" and ev.action == "long_release" and self.audio.is_recording:
+            await self.stop_recording()
             return
 
         if ev.action != "pressed":

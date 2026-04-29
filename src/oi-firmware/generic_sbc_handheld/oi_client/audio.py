@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import logging
 import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -161,7 +164,7 @@ class HandheldAudio:
             import sdl2
             from sdl2 import (
                 SDL_OpenAudioDevice, SDL_AudioSpec,
-                SDL_AUDIO_ALLOW_FORMAT_CHANGE, SDL_TRUE,
+                SDL_AUDIO_ALLOW_FORMAT_CHANGE, SDL_PauseAudioDevice,
             )
         except Exception:
             return False
@@ -194,6 +197,7 @@ class HandheldAudio:
         self._recording_sr = obtained.freq
         self._recording_ch = obtained.channels
         SDL_PauseAudioDevice(self._recording_dev, 0)  # unpause / start
+        logger.info("Audio recording started: sr=%s ch=%s", self._recording_sr, self._recording_ch)
         return True
 
     def stop_recording(self) -> None:
@@ -235,6 +239,7 @@ class HandheldAudio:
                     break
             return bytes(result)
         except Exception as e:
+            logger.debug("read_recording failed: %s", e)
             return b""
 
     @property
