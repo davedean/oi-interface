@@ -381,6 +381,11 @@ REQUIRED_COMMANDS = [
     "device.mute_until",
 ]
 
+# Optional commands for advanced features (not required for basic compliance)
+OPTIONAL_COMMANDS = [
+    "display.show_text_delta",
+]
+
 # ------------------------------------------------------------------
 # Helper Functions
 # ------------------------------------------------------------------

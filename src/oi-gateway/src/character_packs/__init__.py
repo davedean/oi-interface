@@ -33,6 +33,7 @@ Optional overlays:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from enum import Enum
@@ -40,6 +41,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
+
+logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
@@ -724,6 +727,170 @@ class BuiltInPacks:
             version="1.0",
             overlays=overlays,
         )
+
+
+# ------------------------------------------------------------------
+# Device Character Renderer
+# ------------------------------------------------------------------
+
+# Mapping from DATP/agent state names to semantic character states
+_STATE_MAP = {
+    "BOOTING": SemanticState.IDLE,
+    "READY": SemanticState.IDLE,
+    "PAIRING": SemanticState.IDLE,
+    "OFFLINE": SemanticState.OFFLINE,
+    "MUTED": SemanticState.MUTED,
+    "RECORDING": SemanticState.LISTENING,
+    "UPLOADING": SemanticState.UPLOADING,
+    "THINKING": SemanticState.THINKING,
+    "RESPONSE_CACHED": SemanticState.RESPONSE_CACHED,
+    "PLAYING": SemanticState.PLAYING,
+    "SAFE_MODE": SemanticState.SAFE_MODE,
+    "ERROR": SemanticState.ERROR,
+    "BLOCKED": SemanticState.BLOCKED,
+    "TASK_RUNNING": SemanticState.TASK_RUNNING,
+}
+
+
+class CharacterRendererService:
+    def __init__(self, server, registry, command_dispatcher):
+        self._server = server
+        self._registry = registry
+        self._dispatcher = command_dispatcher
+        self._last_rendered = {}
+        self._render_enabled = {}
+        server.event_bus.subscribe(self._on_event)
+        logger.info("CharacterRendererService started")
+
+    def enable_rendering(self, device_id):
+        self._render_enabled[device_id] = True
+
+    def disable_rendering(self, device_id):
+        self._render_enabled[device_id] = False
+
+    def is_rendering_enabled(self, device_id):
+        return self._render_enabled.get(device_id, True)
+
+    def _on_event(self, event_type, device_id, payload):
+        if event_type == "state":
+            mode = payload.get("mode")
+            if mode:
+                self._render_from_display_state(device_id, mode)
+        elif event_type == "event":
+            event_name = payload.get("event", "")
+            if event_name == "button.long_hold_started":
+                self._render_state(device_id, SemanticState.LISTENING)
+            elif event_name == "audio.recording_finished":
+                self._render_state(device_id, SemanticState.UPLOADING)
+            elif event_name == "button.double_tap":
+                self._render_state(device_id, SemanticState.PLAYING)
+            elif event_name == "audio.playback_started":
+                self._render_state(device_id, SemanticState.PLAYING)
+            elif event_name == "audio.playback_finished":
+                self._render_state(device_id, SemanticState.RESPONSE_CACHED)
+            elif event_name == "device.error":
+                self._render_state(device_id, SemanticState.ERROR)
+            elif event_name == "device.capability_updated":
+                self._invalidate_last(device_id)
+
+    def _render_from_display_state(self, device_id, display_state):
+        semantic = self._map_to_semantic_state(display_state)
+        label = None
+        self._render_state(device_id, semantic, label)
+
+    async def render_for_command_async(self, device_id, op, args):
+        semantic, label = self._map_command_to_semantic(op, args)
+        if semantic:
+            await self._render_state_async(device_id, semantic, label)
+
+    def render_for_command(self, device_id, op, args):
+        semantic, label = self._map_command_to_semantic(op, args)
+        if semantic and hasattr(self, '_server'):
+            import asyncio
+            loop = getattr(getattr(self._server, '_server', None), '_loop', None)
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(self._render_state_async(device_id, semantic, label), loop)
+
+    def _map_command_to_semantic(self, op, args):
+        if op == "display.show_status":
+            return self._map_to_semantic_state(args.get("state")), args.get("label")
+        elif op == "audio.cache.put_begin":
+            return SemanticState.UPLOADING, "Buffering"
+        elif op == "audio.cache.put_end":
+            return SemanticState.RESPONSE_CACHED, "Ready"
+        elif op == "audio.play":
+            return SemanticState.PLAYING, "Speaking"
+        elif op == "audio.stop":
+            return SemanticState.IDLE, None
+        elif op == "device.mute_until":
+            return SemanticState.MUTED, "Muted"
+        elif op == "device.reboot":
+            return SemanticState.IDLE, "Booting"
+        elif op == "device.shutdown":
+            return SemanticState.OFFLINE, "Off"
+        return None, None
+
+    def _map_to_semantic_state(self, state_str):
+        if not state_str:
+            return SemanticState.IDLE
+        return _STATE_MAP.get(state_str.upper(), SemanticState.IDLE)
+
+    async def _render_state_async(self, device_id, state, label=None):
+        if not self.is_rendering_enabled(device_id):
+            return False
+        cache_key = (state, label)
+        if self._last_rendered.get(device_id) == cache_key:
+            logger.debug("Character state unchanged for %r: %s", device_id, state.value)
+            return True
+        pack = await self._registry.get_character_pack(device_id)
+        if pack is None:
+            builtins = BuiltInPacks.list()
+            pack = builtins[0] if builtins else None
+            if pack is None:
+                logger.debug("No character pack available for %r", device_id)
+                return False
+        try:
+            renderer = DeviceRenderer(pack)
+            instruction = renderer.render(state.value, custom_label=label)
+            cmd = instruction.to_datp_command(pack.pack_id, pack.target)
+            from ..datp.messages import build_command
+            msg = build_command(device_id, "character.set_state", cmd["args"])
+            sent = await self._server.send_to_device(device_id, msg)
+            if sent:
+                self._last_rendered[device_id] = cache_key
+                logger.info("Rendered character for %r: %s (label=%r)", device_id, state.value, label)
+            return sent
+        except Exception as exc:
+            logger.error("Error rendering character for %r: %s", device_id, exc, exc_info=True)
+            return False
+
+    def _render_state(self, device_id, state, label=None):
+        import asyncio
+        try:
+            asyncio.create_task(self._render_state_async(device_id, state, label))
+        except RuntimeError:
+            pass
+
+    def _invalidate_last(self, device_id):
+        self._last_rendered.pop(device_id, None)
+
+    async def set_character_pack_async(self, device_id, pack_id):
+        result = await self._registry.set_character_pack(device_id, pack_id)
+        if result:
+            self._invalidate_last(device_id)
+            info = await self._registry.get_device(device_id)
+            if info and info.state:
+                mode = info.state.get("mode", "READY")
+                self._render_from_display_state(device_id, mode)
+        return result
+
+    def get_available_states(self, device_id):
+        return [s.value for s in SemanticState] + ["idle"]
+
+    def get_rendering_status(self, device_id):
+        last = self._last_rendered.get(device_id)
+        return {"device_id": device_id, "rendering_enabled": self.is_rendering_enabled(device_id),
+                "last_rendered": {"state": last[0].value if last else None, "label": last[1] if last else None} if last else None}
 
 
 # ------------------------------------------------------------------

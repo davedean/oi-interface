@@ -16,8 +16,9 @@ from routing import RoutingPolicy, RouteRequest
 
 if TYPE_CHECKING:
     from audio.tts import TtsBackend
-    from character_packs import CharacterPackService
     from coding import CodingWorkflowService
+
+from character_packs import CharacterPackService
 
 logger = logging.getLogger(__name__)
 

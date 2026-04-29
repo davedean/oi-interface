@@ -154,6 +154,15 @@ class StateMachine:
                 return self.transition(State.RESPONSE_CACHED)
             return self._state
 
+        if op == "display.show_text_delta":
+            # Text streaming delta - stays in current state while streaming.
+            # On final delta, transition to RESPONSE_CACHED.
+            is_final = args.get("is_final", False)
+            if is_final and State.RESPONSE_CACHED in _valid_destinations(self._state):
+                return self.transition(State.RESPONSE_CACHED)
+            # Otherwise stay in current state (typically THINKING)
+            return self._state
+
         if op == "audio.cache.put_begin":
             # Start caching sequence — stays in current state until put_end.
             # Accepted from UPLOADING (device is uploading, agent responded before thinking event)

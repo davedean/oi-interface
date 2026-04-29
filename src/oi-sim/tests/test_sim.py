@@ -159,6 +159,20 @@ class TestStateMachine:
         assert result == State.RESPONSE_CACHED
         assert sm.state == State.RESPONSE_CACHED
 
+    def test_receive_command_display_text_delta_stays_in_thinking(self):
+        """display.show_text_delta with is_final=False stays in current state."""
+        sm = StateMachine(State.THINKING)
+        result = sm.receive_command("display.show_text_delta", {"text_delta": "Hello", "is_final": False})
+        assert result == State.THINKING
+        assert sm.state == State.THINKING
+
+    def test_receive_command_display_text_delta_final_transitions(self):
+        """display.show_text_delta with is_final=True transitions to RESPONSE_CACHED."""
+        sm = StateMachine(State.THINKING)
+        result = sm.receive_command("display.show_text_delta", {"text_delta": "Hello", "is_final": True})
+        assert result == State.RESPONSE_CACHED
+        assert sm.state == State.RESPONSE_CACHED
+
     def test_receive_command_audio_play_idempotent(self):
         """audio.play from PLAYING is idempotent (no-op, not an error)."""
         sm = StateMachine(State.PLAYING)

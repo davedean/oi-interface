@@ -7,8 +7,9 @@ import os
 from dataclasses import dataclass
 
 from api import GatewayAPI
-from api.character_packs import CharacterPackService
+from character_packs import CharacterPackService
 from audio import AudioDeliveryPipeline, StubTtsBackend
+from text import TextDeliveryPipeline
 from channel import AgentBackend, ChannelService, create_backend_from_env
 from character_packs import CharacterPackStore, CharacterRendererService
 from datp import EventBus
@@ -53,6 +54,10 @@ class GatewayRuntime:
             event_bus=self.event_bus,
             dispatcher=self.dispatcher,
             tts=self.tts,
+        )
+        self.text_delivery = TextDeliveryPipeline(
+            event_bus=self.event_bus,
+            dispatcher=self.dispatcher,
         )
         # Character pack store and renderer
         self.pack_store = CharacterPackStore()
