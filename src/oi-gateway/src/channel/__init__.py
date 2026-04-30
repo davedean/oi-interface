@@ -6,6 +6,7 @@ from .hermes_backend import HermesBackend
 from .openclaw_backend import OpenClawBackend
 from .opencode_backend import OpenCodeBackend
 from .pi_backend import PiBackendError, StubPiBackend, SubprocessPiBackend
+from .piclaw_backend import PiclawBackend
 from .service import ChannelService
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "OpenClawBackend",
     "OpenCodeBackend",
     "PiBackendError",
+    "PiclawBackend",
     "StubPiBackend",
     "SubprocessPiBackend",
 ]

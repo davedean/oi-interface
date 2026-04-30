@@ -13,6 +13,7 @@ from channel.hermes_backend import HermesBackend
 from channel.openclaw_backend import OpenClawBackend
 from channel.opencode_backend import OpenCodeBackend
 from channel.pi_backend import SubprocessPiBackend
+from channel.piclaw_backend import PiclawBackend
 
 
 def test_factory_defaults_to_pi_backend(monkeypatch):
@@ -57,6 +58,34 @@ def test_factory_raises_for_openclaw_without_required_token(monkeypatch):
     monkeypatch.delenv("OI_OPENCLAW_TOKEN", raising=False)
 
     with pytest.raises(ValueError, match="OI_OPENCLAW_TOKEN"):
+        create_backend_from_env()
+
+
+def test_factory_builds_piclaw_backend(monkeypatch):
+    monkeypatch.setenv("OI_AGENT_BACKEND", "piclaw")
+    monkeypatch.setenv("OI_PICLAW_BASE_URL", "http://127.0.0.1:8080")
+    monkeypatch.setenv("OI_PICLAW_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("OI_PICLAW_SESSION_COOKIE", "piclaw_session=abc123")
+    monkeypatch.setenv("OI_PICLAW_INTERNAL_SECRET", "secret-token")
+    monkeypatch.setenv("OI_PICLAW_CHAT_JID_PREFIX", "device-")
+    monkeypatch.setenv("OI_PICLAW_SYSTEM_PROMPT", "be concise")
+
+    backend = create_backend_from_env()
+
+    assert isinstance(backend, PiclawBackend)
+    assert backend._base_url == "http://127.0.0.1:8080"
+    assert backend._timeout_seconds == 45.0
+    assert backend._session_cookie == "piclaw_session=abc123"
+    assert backend._internal_secret == "secret-token"
+    assert backend._chat_jid_prefix == "device-"
+    assert backend._system_prompt == "be concise"
+
+
+def test_factory_raises_for_piclaw_without_required_base_url(monkeypatch):
+    monkeypatch.setenv("OI_AGENT_BACKEND", "piclaw")
+    monkeypatch.delenv("OI_PICLAW_BASE_URL", raising=False)
+
+    with pytest.raises(ValueError, match="OI_PICLAW_BASE_URL"):
         create_backend_from_env()
 
 

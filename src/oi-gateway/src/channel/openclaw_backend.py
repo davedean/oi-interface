@@ -465,6 +465,9 @@ process.stdout.write(Buffer.from(sig).toString("base64").replace(/\+/g, "-").rep
                 raise AgentBackendError(error.get("message", "OpenClaw request failed"))
             raise AgentBackendError("OpenClaw request failed")
 
+    def map_session_key(self, request: AgentRequest) -> str:
+        return self._map_session_key(request.session_key, request.source_device_id)
+
     def _map_session_key(self, session_key: str | None, source_device_id: str) -> str:
         if session_key and session_key.startswith("agent:"):
             return session_key

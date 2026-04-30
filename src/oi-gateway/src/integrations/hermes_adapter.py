@@ -227,11 +227,12 @@ class HermesMQTTAdapter:
                 topic,
                 qos=1,
             )
-            if result[0] == mqtt.MQTT_ERR_SUCCESS:
+            if result[0] == self._mqtt_success_code():
                 logger.info("Subscribed to Hermes topic: %s", topic)
                 return True
-            else:
-                raise HermesSubscribeError(f"MQTT subscribe failed with code {result[0]}")
+            raise HermesSubscribeError(f"MQTT subscribe failed with code {result[0]}")
+        except HermesSubscribeError:
+            raise
         except Exception as e:
             raise HermesSubscribeError(f"Failed to subscribe to {topic}: {e}") from e
 
@@ -248,13 +249,17 @@ class HermesMQTTAdapter:
                 payload_json,
                 qos=1,
             )
-            if result[0] == mqtt.MQTT_ERR_SUCCESS:
+            if result[0] == self._mqtt_success_code():
                 logger.debug("Published to Hermes topic %s: %s", topic, payload_json)
                 return True
-            else:
-                raise HermesPublishError(f"MQTT publish failed with code {result[0]}")
+            raise HermesPublishError(f"MQTT publish failed with code {result[0]}")
+        except HermesPublishError:
+            raise
         except Exception as e:
             raise HermesPublishError(f"Failed to publish to {topic}: {e}") from e
+
+    def _mqtt_success_code(self) -> int:
+        return int(getattr(mqtt, "MQTT_ERR_SUCCESS", 0))
 
     async def handle_message(self, message: HermesMessage) -> None:
         """Handle a received Hermes message.

@@ -9,6 +9,7 @@ from .hermes_backend import HermesBackend
 from .openclaw_backend import OpenClawBackend
 from .opencode_backend import OpenCodeBackend
 from .pi_backend import SubprocessPiBackend
+from .piclaw_backend import PiclawBackend
 
 
 def create_backend_from_env() -> AgentBackend:
@@ -37,6 +38,24 @@ def create_backend_from_env() -> AgentBackend:
             raise ValueError("OI_OPENCLAW_TOKEN is required when OI_AGENT_BACKEND=openclaw")
         timeout_seconds = float(os.getenv("OI_OPENCLAW_TIMEOUT_SECONDS", "120"))
         return OpenClawBackend(url=url, token=token, timeout_seconds=timeout_seconds)
+
+    if backend == "piclaw":
+        base_url = os.getenv("OI_PICLAW_BASE_URL")
+        if not base_url:
+            raise ValueError("OI_PICLAW_BASE_URL is required when OI_AGENT_BACKEND=piclaw")
+        timeout_seconds = float(os.getenv("OI_PICLAW_TIMEOUT_SECONDS", "120"))
+        session_cookie = os.getenv("OI_PICLAW_SESSION_COOKIE")
+        internal_secret = os.getenv("OI_PICLAW_INTERNAL_SECRET")
+        chat_jid_prefix = os.getenv("OI_PICLAW_CHAT_JID_PREFIX", "oi-device-")
+        system_prompt = os.getenv("OI_PICLAW_SYSTEM_PROMPT")
+        return PiclawBackend(
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            session_cookie=session_cookie,
+            internal_secret=internal_secret,
+            chat_jid_prefix=chat_jid_prefix,
+            system_prompt=system_prompt,
+        )
 
     if backend == "opencode":
         command = os.getenv("OI_OPENCODE_COMMAND")
