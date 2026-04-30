@@ -347,8 +347,8 @@ class GatewayAPI:
         if info is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
-        # Validate pack exists if pack_id is provided (not null)
-        if pack_id is not None and self._pack_service is not None:
+        # Validate pack exists if a pack service is configured.
+        if self._pack_service is not None:
             pack = self._pack_service.get_pack(pack_id)
             if pack is None:
                 return self._error_response(f"Character pack '{pack_id}' not found", 404)
@@ -539,7 +539,7 @@ class GatewayAPI:
             }, 500)
 
         # Extract PCM chunks
-        from audio.tts import _wav_to_pcm_chunks, encode_pcm_to_base64
+        from audio.tts import _wav_to_pcm_chunks
 
         pcm_chunks = _wav_to_pcm_chunks(wav_bytes, 1024)
         if not pcm_chunks:
