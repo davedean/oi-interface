@@ -216,6 +216,18 @@ class TestOiSimUnitCoverage:
         assert payload["data_b64"]
 
     @pytest.mark.asyncio
+    async def test_upload_audio_text_sizes_placeholder_from_text_length(self):
+        device, ws = self.make_sim()
+
+        await device.upload_audio_text("hi")
+        short_payload = ws.sent[-1]["payload"]["data_b64"]
+
+        await device.upload_audio_text("hello" * 100)
+        long_payload = ws.sent[-1]["payload"]["data_b64"]
+
+        assert len(long_payload) > len(short_payload)
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("arg", "expected_mode"),
         [
