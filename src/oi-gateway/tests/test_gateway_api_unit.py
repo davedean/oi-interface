@@ -60,7 +60,7 @@ async def test_read_json_invalid(api):
 
 
 @pytest.mark.asyncio
-async def test_health_and_device_info_building(api):
+async def test_health_device_info_and_transcript_listing(api):
     now = datetime.now(timezone.utc)
     device = DeviceInfo(
         device_id="dev1",
@@ -92,6 +92,16 @@ async def test_health_and_device_info_building(api):
 
     missing = await api._device_info(DummyRequest(match_info={"device_id": "missing"}))
     assert missing.status == 404
+
+    api._on_event("transcript", "dev1", {"cleaned": "Hello there", "stream_id": "stream-1"})
+    api._on_event("agent_response", "dev1", {"response_text": "Hi!", "stream_id": "stream-1", "transcript": "Hello there"})
+
+    transcripts = response_json(await api._transcripts_list(DummyRequest()))
+    assert transcripts["count"] == 1
+    assert transcripts["transcripts"][0]["device_id"] == "dev1"
+    assert transcripts["transcripts"][0]["transcript"] == "Hello there"
+    assert transcripts["transcripts"][0]["response"] == "Hi!"
+    assert transcripts["transcripts"][0]["conversation_id"] == "stream-1"
 
 
 @pytest.mark.asyncio

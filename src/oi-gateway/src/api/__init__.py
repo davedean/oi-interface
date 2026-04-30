@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,16 @@ if TYPE_CHECKING:
 from character_packs import CharacterPackService
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TranscriptRecord:
+    timestamp: str
+    device_id: str
+    transcript: str
+    response: str = ""
+    stream_id: str = ""
+    conversation_id: str = ""
 
 
 class GatewayAPI:
@@ -69,6 +80,9 @@ class GatewayAPI:
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
         self._routing_policy: RoutingPolicy | None = None
+        self._transcripts: list[TranscriptRecord] = []
+        if hasattr(self._event_bus, "subscribe"):
+            self._event_bus.subscribe(self._on_event)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -92,6 +106,8 @@ class GatewayAPI:
 
     async def stop(self) -> None:
         """Stop the HTTP server."""
+        if hasattr(self._event_bus, "unsubscribe"):
+            self._event_bus.unsubscribe(self._on_event)
         if self._runner:
             await self._runner.cleanup()
         logger.info("GatewayAPI stopped")
@@ -108,6 +124,7 @@ class GatewayAPI:
         return (
             ("GET", "/api/health", self._health),
             ("GET", "/api/devices", self._devices_list),
+            ("GET", "/api/transcripts", self._transcripts_list),
             ("GET", "/api/devices/{device_id}", self._device_info),
             ("POST", "/api/devices/{device_id}/commands/show_status", self._cmd_show_status),
             ("POST", "/api/devices/{device_id}/commands/mute_until", self._cmd_mute_until),
@@ -177,6 +194,67 @@ class GatewayAPI:
             self._routing_policy = RoutingPolicy(self._datp)
         return self._routing_policy
 
+    def _on_event(self, event_type: str, device_id: str, payload: dict[str, Any]) -> None:
+        if event_type == "transcript":
+            self._record_transcript(device_id, payload)
+            return
+        if event_type == "agent_response":
+            self._record_agent_response(device_id, payload)
+
+    def _record_transcript(self, device_id: str, payload: dict[str, Any]) -> None:
+        transcript = str(payload.get("cleaned") or payload.get("text") or payload.get("transcript") or "").strip()
+        if not transcript:
+            return
+
+        stream_id = str(payload.get("stream_id") or "")
+        conversation_id = str(payload.get("conversation_id") or payload.get("correlation_id") or stream_id or "")
+        self._transcripts.append(
+            TranscriptRecord(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                device_id=device_id,
+                transcript=transcript,
+                stream_id=stream_id,
+                conversation_id=conversation_id or f"{device_id}:{stream_id or len(self._transcripts)}",
+            )
+        )
+        overflow = len(self._transcripts) - 100
+        if overflow > 0:
+            del self._transcripts[:overflow]
+
+    def _record_agent_response(self, device_id: str, payload: dict[str, Any]) -> None:
+        response = str(payload.get("response") or payload.get("response_text") or "").strip()
+        if not response:
+            return
+
+        transcript = str(payload.get("transcript") or "").strip()
+        stream_id = str(payload.get("stream_id") or "")
+        conversation_id = str(payload.get("conversation_id") or payload.get("correlation_id") or stream_id or "")
+        match = self._find_transcript(device_id, conversation_id=conversation_id, stream_id=stream_id)
+        if match is not None:
+            match.response = response
+            return
+
+        self._transcripts.append(
+            TranscriptRecord(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                device_id=device_id,
+                transcript=transcript,
+                response=response,
+                stream_id=stream_id,
+                conversation_id=conversation_id or f"{device_id}:{stream_id or len(self._transcripts)}",
+            )
+        )
+
+    def _find_transcript(self, device_id: str, *, conversation_id: str, stream_id: str) -> TranscriptRecord | None:
+        for entry in reversed(self._transcripts):
+            if entry.device_id != device_id:
+                continue
+            if conversation_id and entry.conversation_id == conversation_id:
+                return entry
+            if stream_id and entry.stream_id == stream_id:
+                return entry
+        return None
+
     # ------------------------------------------------------------------
     # Routes
     # ------------------------------------------------------------------
@@ -209,6 +287,23 @@ class GatewayAPI:
         return self._json_response({
             "devices": devices,
             "count": len(devices),
+        })
+
+    async def _transcripts_list(self, request: web.Request) -> web.Response:
+        """GET /api/transcripts — recent transcript/response pairs."""
+        return self._json_response({
+            "transcripts": [
+                {
+                    "timestamp": entry.timestamp,
+                    "device_id": entry.device_id,
+                    "transcript": entry.transcript,
+                    "response": entry.response,
+                    "stream_id": entry.stream_id,
+                    "conversation_id": entry.conversation_id,
+                }
+                for entry in self._transcripts
+            ],
+            "count": len(self._transcripts),
         })
 
     async def _device_info(self, request: web.Request) -> web.Response:

@@ -115,6 +115,32 @@ class TestDevicesEndpoint:
         assert data["count"] == 0
 
 
+class TestTranscriptEndpoint:
+    async def test_transcripts_reflect_event_bus_activity(self, gateway_api):
+        import aiohttp
+
+        gateway_api._event_bus.emit("transcript", "dev-1", {
+            "cleaned": "Hello there",
+            "stream_id": "stream-1",
+        })
+        gateway_api._event_bus.emit("agent_response", "dev-1", {
+            "transcript": "Hello there",
+            "response_text": "Hi!",
+            "stream_id": "stream-1",
+        })
+
+        url = f"http://{gateway_api._host}:{gateway_api._port}/api/transcripts"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["count"] == 1
+        assert data["transcripts"][0]["device_id"] == "dev-1"
+        assert data["transcripts"][0]["transcript"] == "Hello there"
+        assert data["transcripts"][0]["response"] == "Hi!"
+
+
 class TestCommandEndpoints:
     async def _add_device(self, gateway_api, device_id):
         gateway_api._datp.device_registry[device_id] = {

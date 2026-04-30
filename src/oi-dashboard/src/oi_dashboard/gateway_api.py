@@ -32,6 +32,10 @@ class GatewayApi:
         """Return the gateway health projection."""
         return await self._get_json("/api/health")
 
+    async def get_transcripts(self) -> tuple[int, dict[str, Any]]:
+        """Return the gateway transcript/response projection."""
+        return await self._get_json("/api/transcripts")
+
     async def close(self) -> None:
         """Close the owned HTTP session, if any."""
         if self._owns_session and self._session is not None and not self._session.closed:

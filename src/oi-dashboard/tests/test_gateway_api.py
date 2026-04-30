@@ -94,6 +94,23 @@ async def test_get_health_uses_health_route(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_get_transcripts_uses_transcripts_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, float | None]] = []
+
+    monkeypatch.setattr(
+        "oi_dashboard.gateway_api.aiohttp.ClientSession",
+        lambda: FakeSession(FakeResponse(200, {"transcripts": []}), calls),
+    )
+
+    api = GatewayApi("http://gateway:8788")
+    status, body = await api.get_transcripts()
+
+    assert status == 200
+    assert body == {"transcripts": []}
+    assert calls == [("http://gateway:8788/api/transcripts", 5)]
+
+
+@pytest.mark.asyncio
 async def test_gateway_api_reuses_injected_session_without_owning_it() -> None:
     calls: list[tuple[str, float | None]] = []
     session = FakeSession(FakeResponse(200, {"devices": []}), calls)
@@ -101,10 +118,12 @@ async def test_gateway_api_reuses_injected_session_without_owning_it() -> None:
 
     await api.get_devices()
     await api.get_health()
+    await api.get_transcripts()
     await api.close()
 
     assert calls == [
         ("http://gateway:8788/api/devices", 5),
         ("http://gateway:8788/api/health", 5),
+        ("http://gateway:8788/api/transcripts", 5),
     ]
     assert session.closed is False

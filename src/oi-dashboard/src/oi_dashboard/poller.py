@@ -7,9 +7,10 @@ from .state import DashboardState
 
 
 class DeviceProjectionSource(Protocol):
-    """Protocol for adapters that can fetch the gateway device projection."""
+    """Protocol for adapters that can fetch the gateway projections."""
 
     async def get_devices(self) -> tuple[int, dict[str, Any]]: ...
+    async def get_transcripts(self) -> tuple[int, dict[str, Any]]: ...
 
 
 class DashboardPoller:
@@ -20,13 +21,13 @@ class DashboardPoller:
         self._state = state
 
     async def poll_once(self) -> list[tuple[str, dict[str, Any]]]:
-        """Fetch the current device projection and return state transition events."""
-        status, data = await self._gateway_api.get_devices()
-        if status != 200:
+        """Fetch the current gateway projections and return state transition events."""
+        device_status, device_data = await self._gateway_api.get_devices()
+        if device_status != 200:
             return []
 
         events: list[tuple[str, dict[str, Any]]] = []
-        devices = data.get("devices", [])
+        devices = device_data.get("devices", [])
         current_ids: set[str] = set()
         for device_info in devices:
             device_id = device_info.get("device_id", "")
@@ -38,4 +39,9 @@ class DashboardPoller:
                 events.append(transition)
 
         events.extend(self._state.mark_missing_devices_offline(current_ids))
+
+        transcript_status, transcript_data = await self._gateway_api.get_transcripts()
+        if transcript_status == 200:
+            events.extend(self._state.apply_polled_transcripts(transcript_data.get("transcripts", [])))
+
         return events

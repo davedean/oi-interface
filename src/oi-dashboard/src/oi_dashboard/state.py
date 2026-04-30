@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from .event_payloads import normalize_agent_response_payload, normalize_transcript_payload
+
 
 @dataclass
 class DeviceState:
@@ -179,6 +181,32 @@ class DashboardState:
                 events.append(("device_offline", {"device_id": device_id}))
         return events
 
+    def apply_polled_transcripts(self, transcript_entries: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
+        """Merge transcript/response entries fetched from the gateway API."""
+        events: list[tuple[str, dict[str, Any]]] = []
+        for entry in transcript_entries:
+            device_id = str(entry.get("device_id") or "")
+            if not device_id:
+                continue
+
+            normalized_transcript = normalize_transcript_payload(entry)
+            conversation_id = normalized_transcript["conversation_id"]
+            stream_id = normalized_transcript["stream_id"]
+            matched_entry = self._find_transcript_entry(device_id, conversation_id, stream_id)
+
+            if matched_entry is None:
+                transcript_event = self.record_transcript(device_id, normalized_transcript)
+                if transcript_event is not None:
+                    events.append(("transcript", transcript_event))
+                    matched_entry = self._find_transcript_entry(device_id, conversation_id, stream_id)
+
+            normalized_response = normalize_agent_response_payload(entry)
+            if matched_entry is not None and normalized_response["response"]:
+                if matched_entry.response != normalized_response["response"]:
+                    events.append(("agent_response", self.record_agent_response(device_id, normalized_response)))
+
+        return events
+
     def transcript_listing(self) -> dict[str, Any]:
         """Return the serialized transcript view used by the HTTP API."""
         return {
@@ -223,6 +251,21 @@ class DashboardState:
             **payload,
             "timestamp": self._now_factory(),
         }
+
+    def _find_transcript_entry(
+        self,
+        device_id: str,
+        conversation_id: str,
+        stream_id: str,
+    ) -> TranscriptEntry | None:
+        for entry in reversed(self.transcripts):
+            if entry.device_id != device_id:
+                continue
+            if conversation_id and entry.conversation_id == conversation_id:
+                return entry
+            if stream_id and entry.stream_id == stream_id:
+                return entry
+        return None
 
     def _utc_now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
