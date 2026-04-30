@@ -42,3 +42,10 @@ def test_build_tts_backend_espeak_backend_selects_class(monkeypatch):
     monkeypatch.setattr("audio.tts.subprocess.run", lambda *args, **kwargs: None)
     backend = _build_tts_backend()
     assert backend.__class__.__name__ == "EspeakNgTtsBackend"
+
+
+def test_build_tts_backend_openai_without_key_falls_back_to_stub(monkeypatch):
+    monkeypatch.setenv("OI_TTS_BACKEND", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    backend = _build_tts_backend()
+    assert backend.__class__.__name__ == "StubTtsBackend"

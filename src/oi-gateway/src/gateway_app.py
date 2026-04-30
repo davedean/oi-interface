@@ -14,6 +14,7 @@ from audio import (
     StubTtsBackend,
     PiperTtsBackend,
     EspeakNgTtsBackend,
+    OpenAiTtsBackend,
     StreamAccumulator,
     FasterWhisperBackend,
     OpenAiWhisperBackend,
@@ -37,6 +38,7 @@ def _build_tts_backend() -> object:
     OI_TTS_BACKEND values:
     - piper (default)
     - espeak-ng
+    - openai
     - stub
     """
     backend = os.getenv("OI_TTS_BACKEND", "piper").strip().lower()
@@ -51,6 +53,17 @@ def _build_tts_backend() -> object:
             return tts
         except Exception as exc:
             logger.warning("espeak-ng TTS unavailable (%s); falling back to StubTtsBackend", exc)
+            return StubTtsBackend()
+    if backend == "openai":
+        try:
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            model = os.getenv("OI_OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+            voice = os.getenv("OI_OPENAI_TTS_VOICE", "alloy")
+            tts = OpenAiTtsBackend(api_key=api_key, model=model, voice=voice)
+            logger.info("Using OpenAiTtsBackend model=%s voice=%s", model, voice)
+            return tts
+        except Exception as exc:
+            logger.warning("OpenAI TTS unavailable (%s); falling back to StubTtsBackend", exc)
             return StubTtsBackend()
 
     try:

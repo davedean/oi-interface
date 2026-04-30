@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 import os
 import struct
 import subprocess
 import tempfile
 import time
+import urllib.request
 import uuid
 import wave
 from dataclasses import dataclass
@@ -263,6 +265,36 @@ class EspeakNgTtsBackend:
         finally:
             if os.path.exists(out):
                 os.unlink(out)
+
+
+class OpenAiTtsBackend:
+    """Text-to-speech using OpenAI audio speech API."""
+
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini-tts", voice: str = "alloy") -> None:
+        if not api_key:
+            raise ValueError("OpenAI API key is required")
+        self._api_key = api_key
+        self._model = model
+        self._voice = voice
+
+    def synthesize(self, text: str) -> bytes:
+        payload = {
+            "model": self._model,
+            "voice": self._voice,
+            "input": text,
+            "format": "wav",
+        }
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/audio/speech",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read()
 
 
 class StubTtsBackend:
