@@ -14,7 +14,7 @@ import urllib.request
 import uuid
 import wave
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Iterator, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -277,12 +277,12 @@ class OpenAiTtsBackend:
         self._model = model
         self._voice = voice
 
-    def synthesize(self, text: str) -> bytes:
+    def _request(self, text: str, response_format: str):
         payload = {
             "model": self._model,
             "voice": self._voice,
             "input": text,
-            "format": "wav",
+            "response_format": response_format,
         }
         req = urllib.request.Request(
             "https://api.openai.com/v1/audio/speech",
@@ -293,8 +293,64 @@ class OpenAiTtsBackend:
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.read()
+        return urllib.request.urlopen(req, timeout=60)
+
+    def synthesize_pcm_stream(self, text: str, chunk_size: int = 4096) -> Iterator[bytes]:
+        """Stream raw PCM audio from OpenAI as it arrives."""
+        t0 = time.perf_counter()
+        with self._request(text, response_format="pcm") as resp:
+            first = True
+            total = 0
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                if first:
+                    ttfb_ms = (time.perf_counter() - t0) * 1000
+                    logger.info(
+                        "TTS OpenAI stream start: model=%s voice=%s chars=%d ttfb_ms=%.0f",
+                        self._model,
+                        self._voice,
+                        len(text),
+                        ttfb_ms,
+                    )
+                    first = False
+                total += len(chunk)
+                yield chunk
+            total_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "TTS OpenAI stream done: model=%s voice=%s chars=%d total_ms=%.0f bytes=%d",
+                self._model,
+                self._voice,
+                len(text),
+                total_ms,
+                total,
+            )
+
+    def synthesize(self, text: str) -> bytes:
+        t0 = time.perf_counter()
+        with self._request(text, response_format="wav") as resp:
+            first_chunk = resp.read(4096)
+            ttfb_ms = (time.perf_counter() - t0) * 1000
+            rest = resp.read()
+            audio = first_chunk + rest
+        total_ms = (time.perf_counter() - t0) * 1000
+
+        logger.info(
+            "TTS OpenAI timing: model=%s voice=%s chars=%d ttfb_ms=%.0f total_ms=%.0f bytes=%d",
+            self._model,
+            self._voice,
+            len(text),
+            ttfb_ms,
+            total_ms,
+            len(audio),
+        )
+
+        if len(audio) < 12 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+            preview = audio[:200].decode("utf-8", errors="replace")
+            raise RuntimeError(f"OpenAI TTS did not return WAV audio (preview={preview!r})")
+
+        return audio
 
 
 class StubTtsBackend:

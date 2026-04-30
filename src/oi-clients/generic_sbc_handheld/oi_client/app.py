@@ -505,8 +505,9 @@ class HandheldApp:
             self._recording_stream_id = args.get("stream_id", f"stream_{uuid.uuid4().hex[:8]}")
             self._recording_chunks = []
             self._recording_format = str(args.get("format", "pcm16") or "pcm16").lower()
-            self._recording_sample_rate = int(args.get("sample_rate", 16000) or 16000)
+            self._recording_sample_rate = int(args.get("sample_rate", 24000) or 24000)
             self._recording_channels = int(args.get("channels", 1) or 1)
+            self.audio.start_pcm_stream(sample_rate=self._recording_sample_rate, channels=self._recording_channels)
             logger.info(
                 "audio.begin stream_id=%s response_id=%s format=%s sr=%s ch=%s",
                 self._recording_stream_id,
@@ -524,6 +525,7 @@ class HandheldApp:
                 chunk = b""
             if chunk:
                 self._recording_chunks.append(chunk)
+                self.audio.write_pcm_stream(chunk)
                 logger.debug(
                     "audio.chunk stream_id=%s seq=%s bytes=%d total_chunks=%d",
                     self._recording_stream_id,
@@ -559,6 +561,7 @@ class HandheldApp:
                     channels=self._recording_channels,
                 ))
 
+            self.audio.end_pcm_stream()
             response_id = args.get("response_id", "latest")
             self._response_audio[response_id] = wav
             logger.info(
@@ -570,12 +573,7 @@ class HandheldApp:
                 len(combined),
                 wav,
             )
-            played = self.audio.play(wav)
-            logger.info("audio.play response_id=%s path=%s ok=%s", response_id, wav, played)
-            if not played:
-                self._card.title = "Audio"
-                self._card.body = f"Playback failed ({fmt}, {len(combined)} bytes)"
-                self._ui_mode = UIMode.CARD
+            logger.info("audio.cached response_id=%s path=%s (live stream already started)", response_id, wav)
             self._recording_chunks = []
 
         elif op == "audio.play":

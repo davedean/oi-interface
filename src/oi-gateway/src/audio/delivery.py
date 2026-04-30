@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from .tts import TtsBackend, generate_response_id, _wav_to_pcm_chunks, encode_pcm_to_base64
@@ -123,24 +124,9 @@ class AudioDeliveryPipeline:
         """Internal: run TTS and deliver audio to device (assumes caller holds device lock)."""
         response_id = generate_response_id()
 
-        # Step 1: Run TTS synthesis (blocking, run in thread)
-        try:
-            wav_bytes = await asyncio.to_thread(self._tts.synthesize, response_text)
-        except Exception as exc:
-            logger.exception("TTS synthesis failed for response %s: %s", response_id, exc)
-            return
+        tts_start = time.perf_counter()
 
-        if not wav_bytes:
-            logger.warning("TTS returned empty audio for response %s", response_id)
-            return
-
-        # Step 2: Extract PCM chunks from WAV
-        pcm_chunks = _wav_to_pcm_chunks(wav_bytes, self._chunk_size)
-        if not pcm_chunks:
-            logger.warning("No PCM data extracted from WAV for response %s", response_id)
-            return
-
-        # Step 3: Send cache_put_begin
+        # Step 1: Send cache_put_begin first so we can stream chunks as soon as available.
         ok = await self._dispatcher.cache_put_begin(device_id, response_id)
         if not ok:
             logger.warning(
@@ -150,35 +136,80 @@ class AudioDeliveryPipeline:
             )
             return
 
-        # Step 4: Send cache_put_chunk for each chunk
-        try:
-            for seq, pcm_chunk in enumerate(pcm_chunks):
-                data_b64 = encode_pcm_to_base64(pcm_chunk)
-                ok = await self._dispatcher.cache_put_chunk(
+        # Step 2: Stream PCM directly when backend supports it (OpenAI), else synthesize full WAV.
+        first_chunk_sent_ms: float | None = None
+        chunk_count = 0
+        tts_total_ms: float | None = None
+
+        if hasattr(self._tts, "synthesize_pcm_stream"):
+            try:
+                stream_iter = await asyncio.to_thread(self._tts.synthesize_pcm_stream, response_text, self._chunk_size)
+                seq = 0
+                for pcm_chunk in stream_iter:
+                    data_b64 = encode_pcm_to_base64(pcm_chunk)
+                    ok = await self._dispatcher.cache_put_chunk(device_id, response_id, seq, data_b64)
+                    if not ok:
+                        logger.warning(
+                            "audio.cache.chunk (seq=%d) failed for device %s, response %s",
+                            seq,
+                            device_id,
+                            response_id,
+                        )
+                        return
+                    if seq == 0:
+                        first_chunk_sent_ms = (time.perf_counter() - tts_start) * 1000
+                    seq += 1
+                chunk_count = seq
+                tts_total_ms = (time.perf_counter() - tts_start) * 1000
+            except Exception as exc:
+                logger.exception("TTS streaming failed for response %s: %s", response_id, exc)
+                return
+        else:
+            try:
+                wav_bytes = await asyncio.to_thread(self._tts.synthesize, response_text)
+            except Exception as exc:
+                logger.exception("TTS synthesis failed for response %s: %s", response_id, exc)
+                return
+            tts_total_ms = (time.perf_counter() - tts_start) * 1000
+
+            if not wav_bytes:
+                logger.warning("TTS returned empty audio for response %s", response_id)
+                return
+
+            pcm_chunks = _wav_to_pcm_chunks(wav_bytes, self._chunk_size)
+            if not pcm_chunks:
+                logger.warning("No PCM data extracted from WAV for response %s", response_id)
+                return
+
+            try:
+                for seq, pcm_chunk in enumerate(pcm_chunks):
+                    data_b64 = encode_pcm_to_base64(pcm_chunk)
+                    ok = await self._dispatcher.cache_put_chunk(device_id, response_id, seq, data_b64)
+                    if not ok:
+                        logger.warning(
+                            "audio.cache.chunk (seq=%d) failed for device %s, response %s",
+                            seq,
+                            device_id,
+                            response_id,
+                        )
+                        return
+                    if seq == 0:
+                        first_chunk_sent_ms = (time.perf_counter() - tts_start) * 1000
+                chunk_count = len(pcm_chunks)
+            except Exception as exc:
+                logger.exception(
+                    "Error sending chunks to device %s, response %s: %s",
                     device_id,
                     response_id,
-                    seq,
-                    data_b64,
+                    exc,
                 )
-                if not ok:
-                    logger.warning(
-                        "audio.cache.chunk (seq=%d) failed for device %s, response %s",
-                        seq,
-                        device_id,
-                        response_id,
-                    )
-                    return
-        except Exception as exc:
-            logger.exception(
-                "Error sending chunks to device %s, response %s: %s",
-                device_id,
-                response_id,
-                exc,
-            )
+                return
+
+        if chunk_count == 0:
+            logger.warning("No PCM chunks produced for response %s", response_id)
             return
 
-        # Step 5: Send cache_put_end
-        # Note: SHA256 is currently not calculated; pass None (optional per spec)
+        # Step 3: Send cache_put_end
         ok = await self._dispatcher.cache_put_end(device_id, response_id, sha256=None)
         if not ok:
             logger.warning(
@@ -189,11 +220,21 @@ class AudioDeliveryPipeline:
             return
 
         # Step 6: Emit audio_delivered event
+        total_gateway_ms = (time.perf_counter() - tts_start) * 1000
         logger.info(
             "Audio delivered to device %s (response_id=%s, chunks=%d)",
             device_id,
             response_id,
-            len(pcm_chunks),
+            chunk_count,
+        )
+        logger.info(
+            "TTS pipeline timing: response_id=%s chars=%d tts_total_ms=%.0f first_chunk_sent_ms=%.0f gateway_total_ms=%.0f chunks=%d",
+            response_id,
+            len(response_text),
+            tts_total_ms or -1,
+            first_chunk_sent_ms or -1,
+            total_gateway_ms,
+            chunk_count,
         )
 
         self._event_bus.emit("audio_delivered", device_id, {
@@ -202,5 +243,5 @@ class AudioDeliveryPipeline:
             "stream_id": payload.get("stream_id"),
             "transcript": payload.get("transcript"),
             "device_context": payload.get("device_context"),
-            "chunk_count": len(pcm_chunks),
+            "chunk_count": chunk_count,
         })

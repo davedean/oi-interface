@@ -34,15 +34,15 @@ logger = logging.getLogger(__name__)
 
 
 def _build_tts_backend() -> object:
-    """Select TTS backend from env, defaulting to Piper when available.
+    """Select TTS backend from env, defaulting to OpenAI when available.
 
     OI_TTS_BACKEND values:
-    - piper (default)
+    - openai (default)
+    - piper
     - espeak-ng
-    - openai
     - stub
     """
-    backend = os.getenv("OI_TTS_BACKEND", "piper").strip().lower()
+    backend = os.getenv("OI_TTS_BACKEND", "openai").strip().lower()
     if backend == "stub":
         logger.warning("Using StubTtsBackend (silent test audio)")
         return StubTtsBackend()
@@ -219,7 +219,7 @@ async def main() -> None:
     load_gateway_toml_config()
     logger.info("Gateway python executable: %s", sys.executable)
     logger.info("Gateway python version: %s", sys.version.split()[0])
-    logger.info("OI_AGENT_BACKEND=%s OI_TTS_BACKEND=%s", os.getenv("OI_AGENT_BACKEND", "pi"), os.getenv("OI_TTS_BACKEND", "piper"))
+    logger.info("OI_AGENT_BACKEND=%s OI_TTS_BACKEND=%s", os.getenv("OI_AGENT_BACKEND", "pi"), os.getenv("OI_TTS_BACKEND", "openai"))
     backend = create_backend_from_env()
     runtime = GatewayRuntime(
         agent_backend=backend,

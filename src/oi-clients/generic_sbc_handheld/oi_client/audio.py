@@ -32,6 +32,7 @@ class HandheldAudio:
     def __init__(self) -> None:
         self._playing = False
         self._status = AudioStatus()
+        self._stream_proc: subprocess.Popen | None = None
 
     def detect(self) -> AudioStatus:
         """Detect available audio hardware."""
@@ -88,10 +89,51 @@ class HandheldAudio:
     def stop(self) -> None:
         """Kill any running aplay process."""
         try:
+            if self._stream_proc and self._stream_proc.poll() is None:
+                self._stream_proc.terminate()
+            self._stream_proc = None
             subprocess.run(["pkill", "-f", "aplay"], capture_output=True)
         except Exception:
             pass
         self._playing = False
+
+    def start_pcm_stream(self, sample_rate: int = 24000, channels: int = 1) -> bool:
+        """Start streaming raw PCM16LE to aplay stdin."""
+        try:
+            if self._stream_proc and self._stream_proc.poll() is None:
+                self._stream_proc.terminate()
+            self._stream_proc = subprocess.Popen(
+                ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(sample_rate), "-c", str(channels), "-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._playing = self._stream_proc.poll() is None
+            return self._playing
+        except Exception as exc:
+            logger.warning("start_pcm_stream failed: %s", exc)
+            self._stream_proc = None
+            return False
+
+    def write_pcm_stream(self, pcm_chunk: bytes) -> bool:
+        """Write a PCM chunk to active stream."""
+        try:
+            if not self._stream_proc or self._stream_proc.poll() is not None or not self._stream_proc.stdin:
+                return False
+            self._stream_proc.stdin.write(pcm_chunk)
+            self._stream_proc.stdin.flush()
+            return True
+        except Exception:
+            return False
+
+    def end_pcm_stream(self) -> None:
+        """Finalize active PCM stream playback."""
+        try:
+            if self._stream_proc and self._stream_proc.stdin:
+                self._stream_proc.stdin.close()
+        except Exception:
+            pass
+        self._stream_proc = None
 
     def is_playing(self) -> bool:
         """Best-effort check if playback is still active."""

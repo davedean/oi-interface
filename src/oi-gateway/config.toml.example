@@ -13,7 +13,7 @@ OI_STT_BACKEND = "openai"
 OI_OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"
 
 # TTS options: piper | espeak-ng | openai | stub
-OI_TTS_BACKEND = "espeak-ng"
-OI_TTS_VOICE = "en"
-# OI_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
-# OI_OPENAI_TTS_VOICE = "alloy"
+OI_TTS_BACKEND = "openai"
+# OI_TTS_VOICE = "en"
+OI_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+OI_OPENAI_TTS_VOICE = "alloy"
