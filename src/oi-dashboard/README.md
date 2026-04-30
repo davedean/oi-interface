@@ -40,4 +40,3 @@ pytest tests/
 - The dashboard is read-only and proxies selected gateway API endpoints.
 - `/events` emits standard SSE `message` frames whose JSON body has the shape `{ "type": ..., "data": ... }`.
 - `/api/transcripts` returns serialized transcript objects with `timestamp`, `device_id`, `transcript`, `response`, and `stream_id` fields.
-- TODO: add a short local dev stack example that starts `oi-gateway` + `oi-dashboard` together.

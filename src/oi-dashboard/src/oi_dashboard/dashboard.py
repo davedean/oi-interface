@@ -147,7 +147,7 @@ class Dashboard:
         if STATIC_DIR.exists():
             self._app.router.add_static("/static", str(STATIC_DIR))
 
-    async def _index(self, request: web.Request) -> web.Response:
+    async def _index(self, _request: web.Request) -> web.Response:
         """Serve the dashboard HTML page."""
         return web.Response(text=self._load_index_html(), content_type="text/html")
 
@@ -197,7 +197,7 @@ class Dashboard:
         for client in list(self._sse_clients):
             asyncio.create_task(self._send_sse_event(client, event_type, data))
 
-    async def _api_devices(self, request: web.Request) -> web.Response:
+    async def _api_devices(self, _request: web.Request) -> web.Response:
         """Proxy to gateway /api/devices."""
         return await self._proxy_request(f"{self._api_base}/api/devices")
 
@@ -206,14 +206,14 @@ class Dashboard:
         device_id = request.match_info["device_id"]
         return await self._proxy_request(f"{self._api_base}/api/devices/{device_id}")
 
-    async def _api_transcripts(self, request: web.Request) -> web.Response:
+    async def _api_transcripts(self, _request: web.Request) -> web.Response:
         """Return cached transcript entries."""
         return self._json_response({
             "transcripts": self._transcript_payloads(self._transcripts[-50:]),  # Last 50
             "count": len(self._transcripts),
         })
 
-    async def _api_health(self, request: web.Request) -> web.Response:
+    async def _api_health(self, _request: web.Request) -> web.Response:
         """Proxy to gateway /api/health."""
         return await self._proxy_request(f"{self._api_base}/api/health")
 
