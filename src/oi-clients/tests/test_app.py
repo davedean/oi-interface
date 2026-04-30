@@ -241,6 +241,54 @@ async def test_handle_input_navigation_and_menu(app: HandheldApp) -> None:
     assert app._prompt_idx == 1
     app._send_prompt.assert_awaited_once_with(app_mod.CANNED_PROMPTS[1])
     assert app._ui_mode == UIMode.MENU
+    assert app._menu_mode == "main"
+
+
+@pytest.mark.asyncio
+async def test_menu_character_size_toggle(app: HandheldApp) -> None:
+    app._ui_mode = UIMode.HOME
+    await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
+    assert app._ui_mode == UIMode.MENU
+    assert app._menu_mode == "settings"
+
+    app._menu_idx = app._menu_items().index("Character Size")
+    original = app._character_size
+
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+
+    assert app._character_size != original
+    assert app._card.title == "Character Size"
+    assert app._ui_mode == UIMode.CARD
+
+
+@pytest.mark.asyncio
+async def test_menu_mute_toggle(app: HandheldApp) -> None:
+    app._ui_mode = UIMode.HOME
+    await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
+    app._menu_idx = app._menu_items().index("Mute")
+
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._device_control.is_muted() is True
+    assert app._card.title == "Mute"
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "settings"
+    app._menu_idx = app._menu_items().index("Mute")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._device_control.is_muted() is False
+
+
+@pytest.mark.asyncio
+async def test_menu_show_progress_toggle(app: HandheldApp) -> None:
+    app._ui_mode = UIMode.HOME
+    await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
+    app._menu_idx = app._menu_items().index("Show Progress")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+
+    app._ui_mode = UIMode.WAITING
+    app._card.body = "Working"
+    app._handle_command({"op": "display.show_progress", "args": {"text": "step 1"}})
+    assert "step 1" not in app._card.body
 
 
 @pytest.mark.asyncio
@@ -284,6 +332,50 @@ def test_draw_frame_and_ascii_blob_cover_modes(app: HandheldApp, monkeypatch) ->
     app._ui_mode = UIMode.ERROR
     error_blob = app._ascii_blob_lines()
 
-    assert len(waiting_blob) == 8
-    assert len(card_blob) == 8
-    assert len(error_blob) == 8
+    assert waiting_blob
+    assert card_blob
+    assert error_blob
+    assert isinstance(waiting_blob[0], str)
+    assert isinstance(card_blob[0], str)
+    assert isinstance(error_blob[0], str)
+
+
+def test_ascii_character_size_small_uses_mini_frames(monkeypatch) -> None:
+    monkeypatch.setattr(app_mod, "Sdl2Input", StubInput)
+    monkeypatch.setattr(app_mod, "Sdl2Renderer", StubRenderer)
+    monkeypatch.setattr(app_mod, "HandheldAudio", StubAudio)
+    monkeypatch.setattr(HandheldApp, "_get_version", lambda self: "testver")
+    monkeypatch.setattr(app_mod.time, "time", lambda: 100.0)
+
+    app = HandheldApp("ws://gateway/datp", "dev1", "handheld", character_size="small")
+    app._character_state = "playing"
+    blob = app._ascii_blob_lines()
+
+    assert len(blob) == 1
+    assert blob[0] in {"(o_o)♪", "(^_^)♫"}
+
+
+@pytest.mark.asyncio
+async def test_settings_persist_callback_invoked(monkeypatch) -> None:
+    monkeypatch.setattr(app_mod, "Sdl2Input", StubInput)
+    monkeypatch.setattr(app_mod, "Sdl2Renderer", StubRenderer)
+    monkeypatch.setattr(app_mod, "HandheldAudio", StubAudio)
+    monkeypatch.setattr(HandheldApp, "_get_version", lambda self: "testver")
+    writes = []
+
+    app = HandheldApp(
+        "ws://gateway/datp",
+        "dev1",
+        "handheld",
+        settings_persist=lambda payload: writes.append(payload),
+    )
+    app._ui_mode = UIMode.HOME
+    await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
+    app._menu_idx = app._menu_items().index("Show Progress")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+
+    assert writes
+    latest = writes[-1]
+    assert "character_size" in latest
+    assert "show_progress_messages" in latest
+    assert "show_celebrations" in latest

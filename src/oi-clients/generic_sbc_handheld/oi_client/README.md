@@ -58,6 +58,13 @@ PYSDL2_DLL_PATH=/usr/lib \
 python3 -m oi_client
 ```
 
+`config.json` supports:
+- `character_size`: `big` or `small`
+- `show_progress_messages`: `true` or `false`
+- `show_celebrations`: `true` or `false`
+
+Changes made in the Settings menu are persisted automatically to `config.json`.
+
 From EmulationStation (production):
 - Drop `Oi.sh` launcher into `/storage/roms/ports/`
 - ES shows "Oi" in Ports menu

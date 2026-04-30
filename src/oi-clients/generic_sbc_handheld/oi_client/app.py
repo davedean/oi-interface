@@ -11,9 +11,11 @@ import glob
 import os
 import tempfile
 import logging
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from enum import Enum
 import uuid
+from typing import Callable
 
 from oi_client.state import State
 from oi_client.input import Sdl2Input, InputEvent
@@ -65,6 +67,93 @@ class CardData:
 
 logger = logging.getLogger(__name__)
 
+_ASCII_STATES = (
+    "idle",
+    "listening",
+    "uploading",
+    "thinking",
+    "response_cached",
+    "playing",
+    "confirm",
+    "muted",
+    "offline",
+    "error",
+    "safe_mode",
+    "task_running",
+    "blocked",
+)
+
+_ASCII_FRAMES_BIG: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "idle": (
+        (" .---.", "( o o )", "(  -  )", " `-+-'"),
+        (" .---.", "( ^ ^ )", "(  -  )", " `-+-'"),
+    ),
+    "listening": (
+        (" .---.", "( o o ) )))", "(  -\\ )", " `-+-'"),
+        (" .---.", "( O o ) ))))", "(  o\\ )", " `-+-'"),
+    ),
+    "uploading": (
+        ("   ^", "   |", " .---.", "( o o )", "(  v/ )", " `-+-'"),
+        ("   ^ ^", "   | |", " .---.", "( ^ o )", "(  v/ )", " `-+-'"),
+    ),
+    "thinking": (
+        (" .---.", "( o o )", "(  ?  )", " `-+-'"),
+        ("... .---.", "   ( - o )", "   (  ?  )", "    `-+-'"),
+    ),
+    "response_cached": (
+        ("[db]✓", " .---.", "( o o )", "(  v  )", " `-+-'"),
+        ("[db]✦", " .---.", "( ^ o )", "( \\v/ )", " `-+-'"),
+    ),
+    "playing": (
+        ("  ♪", " .---.", "( o o )", "(  v/ )", " `-+-'"),
+        ("  ♫", " .---.", "( ^ ^ )", "( \\v/ )", " `-+-'"),
+    ),
+    "confirm": (
+        ("  ✓", " .---.", "( ^ o )", "(  v/ )", " `-+-'"),
+        ("  ✓✓", " .---.", "( ^ ^ )", "( \\v/ )", " `-+-'"),
+    ),
+    "muted": (
+        (" .---.  x", "( o o )", "(  sh )", " `-+-'"),
+        (" .---.  x", "( - - )", "(  sh )", " `-+-'"),
+    ),
+    "offline": (
+        (" .---.  _", "( - - )", "(  .  )", " `-+-'"),
+        (" .---.  z", "( x - )", "(  .  )", " `-+-'"),
+    ),
+    "error": (
+        ("  !", " .---.", "( o O )", "(  !  )", " `-+-'"),
+        ("  !!!", " .---.", "( X X )", "(  ^  )", " `-+-'"),
+    ),
+    "safe_mode": (
+        (" [#]", " .---.", "( o o )", "(  -  )", " `-+-'"),
+        (" [###]", " .---.", "( > < )", "(  -  )", " `-+-'"),
+    ),
+    "task_running": (
+        (" .---.  /", "( o o )", "(  [_] )", " `-+-'"),
+        (" .---.  -", "( > o )", "(  [_] )", " `-+-'"),
+    ),
+    "blocked": (
+        (" NO", " .---.", "( o o )", "(  |/ )", " `-+-'"),
+        (" STOP", " .---.", "( > < )", "( \\|/ )", " `-+-'"),
+    ),
+}
+
+_ASCII_FRAMES_SMALL: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "idle": (("(o_o)",), ("(^_^)",)),
+    "listening": (("(o_o)))",), ("(O_o))))",)),
+    "uploading": (("(o_o)^",), ("(^o^)^^",)),
+    "thinking": (("(o_o)?",), ("(-o)...",)),
+    "response_cached": (("(o_o)✓",), ("(^o^)✓",)),
+    "playing": (("(o_o)♪",), ("(^_^)♫",)),
+    "confirm": (("(^o)✓",), ("(^_^)✓",)),
+    "muted": (("(o_o)x",), ("(-_-)x",)),
+    "offline": (("(-_-)",), ("(x_-)",)),
+    "error": (("(o_O)!",), ("(X_X)!",)),
+    "safe_mode": (("(o_o)#",), ("(>_<)#",)),
+    "task_running": (("(o_o)/",), ("(>_o)-",)),
+    "blocked": (("(o_o)⊘",), ("(>_<)⊘",)),
+}
+
 
 def _coerce_int(value: object, default: int) -> int:
     try:
@@ -74,7 +163,16 @@ def _coerce_int(value: object, default: int) -> int:
 
 
 class HandheldApp:
-    def __init__(self, gateway_url: str, device_id: str, device_type: str) -> None:
+    def __init__(
+        self,
+        gateway_url: str,
+        device_id: str,
+        device_type: str,
+        character_size: str | None = None,
+        show_progress_messages: bool = True,
+        show_celebrations: bool = True,
+        settings_persist: Callable[[dict[str, object]], None] | None = None,
+    ) -> None:
         self.gateway_url = gateway_url
         self.device_id = device_id
         self.device_type = device_type
@@ -114,7 +212,9 @@ class HandheldApp:
 
         # Menu
         self._menu_idx = 0
-        self._menu_items = ["About Gateway", "Reload", "Reconnect", "Quit"]
+        self._menu_mode = "main"
+        self._menu_main_items = ["About Gateway", "Reload", "Reconnect", "Quit"]
+        self._menu_settings_items = ["Character Size", "Mute", "Show Progress", "Show Celebrations", "Back"]
 
         # Delight / easter eggs
         self._secret_tracker = SecretTracker()
@@ -131,6 +231,12 @@ class HandheldApp:
         self._character_overlay_sprite: str | None = None
         self._character_overlay_label: str = ""
         self._character_pack_id: str = ""
+        self._character_state: str = "idle"
+        size_value = (character_size or os.getenv("OI_CHARACTER_SIZE", "big")).strip().lower()
+        if size_value == "mini":
+            size_value = "small"
+        self._character_size = size_value if size_value in {"big", "small"} else "big"
+        self._settings_persist = settings_persist
 
         # Device command / telemetry state
         self._device_control = DeviceController()
@@ -164,6 +270,8 @@ class HandheldApp:
         # Display version
         self._version = self._get_version()
         self._celebration_note = ""
+        self._show_progress_messages = bool(show_progress_messages)
+        self._show_celebrations = bool(show_celebrations)
 
     def _get_version(self) -> str:
         """Get git commit hash for display."""
@@ -419,6 +527,13 @@ class HandheldApp:
 
         if ev.name == "start":
             self._ui_mode = UIMode.MENU
+            self._menu_mode = "main"
+            self._menu_idx = 0
+            return
+
+        if ev.name == "select":
+            self._ui_mode = UIMode.MENU
+            self._menu_mode = "settings"
             self._menu_idx = 0
             return
 
@@ -470,11 +585,48 @@ class HandheldApp:
                 self._running = False
 
     async def _handle_menu(self, name: str) -> None:
+        menu_items = self._menu_items()
         if name == "a":
-            item = self._menu_items[self._menu_idx]
+            item = menu_items[self._menu_idx]
             if item == "About Gateway":
                 self._card.title = "Gateway"
                 self._card.body = "\n".join(format_gateway_about(self.datp.server_info if self.datp else None))
+                self._card_scroll = 0
+                self._ui_mode = UIMode.CARD
+            elif item == "Character Size":
+                self._character_size = "small" if self._character_size == "big" else "big"
+                self._persist_settings()
+                self._card.title = "Character Size"
+                self._card.body = f"Set to {self._character_size}"
+                self._card_scroll = 0
+                self._ui_mode = UIMode.CARD
+            elif item == "Mute":
+                if self._device_control.is_muted():
+                    self._device_control.clear_mute()
+                    self._card.title = "Mute"
+                    self._card.body = "Audio unmuted"
+                else:
+                    until = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+                    self._device_control.apply("device.mute_until", {"until": until})
+                    self.audio.stop()
+                    self._card.title = "Mute"
+                    self._card.body = f"Muted until {self._device_control.muted_until}"
+                self._card_scroll = 0
+                self._ui_mode = UIMode.CARD
+            elif item == "Show Progress":
+                self._show_progress_messages = not self._show_progress_messages
+                self._persist_settings()
+                self._card.title = "Show Progress"
+                self._card.body = f"Set to {'on' if self._show_progress_messages else 'off'}"
+                self._card_scroll = 0
+                self._ui_mode = UIMode.CARD
+            elif item == "Show Celebrations":
+                self._show_celebrations = not self._show_celebrations
+                if not self._show_celebrations:
+                    self._celebration_note = ""
+                self._persist_settings()
+                self._card.title = "Show Celebrations"
+                self._card.body = f"Set to {'on' if self._show_celebrations else 'off'}"
                 self._card_scroll = 0
                 self._ui_mode = UIMode.CARD
             elif item == "Reload":
@@ -495,12 +647,36 @@ class HandheldApp:
                         return
                     self._online = self.datp.is_connected
                     self._ui_mode = UIMode.READY if self._online else UIMode.ERROR
+            elif item == "Back":
+                self._menu_mode = "main"
+                self._menu_idx = 0
         elif name == "b":
-            self._ui_mode = UIMode.HOME
+            if self._menu_mode == "settings":
+                self._menu_mode = "main"
+                self._menu_idx = 0
+            else:
+                self._ui_mode = UIMode.HOME
         elif name == "up":
-            self._menu_idx = (self._menu_idx - 1) % len(self._menu_items)
+            self._menu_idx = (self._menu_idx - 1) % len(menu_items)
         elif name == "down":
-            self._menu_idx = (self._menu_idx + 1) % len(self._menu_items)
+            self._menu_idx = (self._menu_idx + 1) % len(menu_items)
+
+    def _menu_items(self) -> list[str]:
+        if self._menu_mode == "settings":
+            return self._menu_settings_items
+        return self._menu_main_items
+
+    def _persist_settings(self) -> None:
+        if self._settings_persist is None:
+            return
+        try:
+            self._settings_persist({
+                "character_size": self._character_size,
+                "show_progress_messages": self._show_progress_messages,
+                "show_celebrations": self._show_celebrations,
+            })
+        except Exception as exc:
+            logger.warning("settings persistence failed: %s", exc)
 
     def _selected_prompt(self) -> str:
         choice = CANNED_PROMPTS[self._prompt_idx]
@@ -549,6 +725,8 @@ class HandheldApp:
     def _handle_display_show_status(self, _op: str, args: dict) -> bool:
         state = args.get("state", "")
         label = args.get("label", "")
+        if state:
+            self._character_state = str(state).lower()
         self._ui_mode = self._state_to_ui(state)
         self._card.title = state.capitalize() if state else "Oi"
         if label:
@@ -558,7 +736,7 @@ class HandheldApp:
     def _handle_display_show_card(self, _op: str, args: dict) -> bool:
         self._card.title = args.get("title", "Response")
         body = args.get("body", "")
-        if self._card.title.lower() == "response":
+        if self._card.title.lower() == "response" and self._show_celebrations:
             self._celebration_note = pick_celebration(len(body))
             if self._celebration_note:
                 body = body + ("\n\n" if body else "") + self._celebration_note
@@ -570,6 +748,8 @@ class HandheldApp:
     def _handle_display_show_progress(self, _op: str, args: dict) -> bool:
         text = (args.get("text", "") or "").strip()
         if text and self._ui_mode == UIMode.WAITING:
+            if not self._show_progress_messages:
+                return True
             self._card.title = "Working"
             body = self._card.body or ""
             self._card.body = (body + ("\n" if body else "") + f"• {text}")[-1200:]
@@ -586,9 +766,10 @@ class HandheldApp:
                 self._card_scroll = 0
             self._card.body = (self._card.body or "") + text_delta
         if is_final:
-            self._celebration_note = pick_celebration(len(self._card.body))
-            if self._celebration_note and self._celebration_note not in self._card.body:
-                self._card.body = (self._card.body or "") + "\n\n" + self._celebration_note
+            if self._show_celebrations:
+                self._celebration_note = pick_celebration(len(self._card.body))
+                if self._celebration_note and self._celebration_note not in self._card.body:
+                    self._card.body = (self._card.body or "") + "\n\n" + self._celebration_note
             self._card_scroll = 0
             self._ui_mode = UIMode.CARD
         elif self._ui_mode == UIMode.WAITING and text_delta:
@@ -602,6 +783,9 @@ class HandheldApp:
         self._character_overlay_sprite = args.get("overlay")
         self._character_overlay_label = args.get("overlay_label", "")
         self._character_pack_id = args.get("pack_id", "")
+        mapped_state = self._state_from_sprite(self._character_sprite)
+        if mapped_state:
+            self._character_state = mapped_state
         return True
 
     def _handle_audio_cache_put_begin(self, _op: str, args: dict) -> bool:
@@ -794,10 +978,21 @@ class HandheldApp:
 
         elif self._ui_mode == UIMode.MENU:
             lines = []
-            for i, item in enumerate(self._menu_items):
+            menu_items = self._menu_items()
+            for i, item in enumerate(menu_items):
                 marker = "> " if i == self._menu_idx else "  "
-                lines.append(f"{marker}{item}")
-            self.renderer.draw_card("Menu", lines, 0, ascii_bg_lines=blob)
+                if item == "Character Size":
+                    lines.append(f"{marker}{item}: {self._character_size}")
+                elif item == "Mute":
+                    lines.append(f"{marker}{item}: {'on' if self._device_control.is_muted() else 'off'}")
+                elif item == "Show Progress":
+                    lines.append(f"{marker}{item}: {'on' if self._show_progress_messages else 'off'}")
+                elif item == "Show Celebrations":
+                    lines.append(f"{marker}{item}: {'on' if self._show_celebrations else 'off'}")
+                else:
+                    lines.append(f"{marker}{item}")
+            menu_title = "Settings" if self._menu_mode == "settings" else "Menu"
+            self.renderer.draw_card(menu_title, lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.ERROR:
             url = getattr(self, 'gateway_url', '?')
@@ -831,62 +1026,64 @@ class HandheldApp:
         self.renderer.present()
 
     def _ascii_blob_lines(self) -> list[str]:
-        """Return a Kirby-inspired animated ASCII character for current UI mode."""
-        import time
+        """Return state-driven ASCII character art (big or small)."""
+        frame_index = int(time.time() * 3.0) % 2
+        state = self._current_ascii_state()
+        frames = self._ascii_frames(state, self._character_size)
+        return list(frames[frame_index])
 
-        t = time.time()
-
-        # HOME/READY: mostly still, occasional blink.
-        home_blink = int(t * 1.1) % 10 == 0
-
-        # WAITING: subtle left/right shuffle.
-        wait_step = int(t * 3.0) % 2
-
-        # SPEAKING (shown while response card is active): mouth movement cycle.
-        speak_step = int(t * 6.0) % 4
-
-        if self._ui_mode in (UIMode.WAITING, UIMode.RECORDING):
-            feet = "    _/ /  \\ \\_" if wait_step == 0 else "   _/ /  \\ \\_ "
-            return [
-                "   .-\"\"\"\"\"\"-.   ",
-                " .'  _    _  '. ",
-                " /   (o)  (o)   \\",
-                "|       ▿        |",
-                "|    \\______/    |",
-                " \\  .-.__.__-.  /",
-                "  '._  ____  _.' ",
-                feet,
-            ]
-
+    def _current_ascii_state(self) -> str:
+        state = self._character_state.strip().lower() if self._character_state else ""
+        if state in _ASCII_STATES:
+            return state
+        if self._ui_mode == UIMode.RECORDING:
+            return "listening"
+        if self._ui_mode == UIMode.WAITING:
+            return "thinking"
+        if self._ui_mode == UIMode.CARD and self.audio.is_playing():
+            return "playing"
         if self._ui_mode == UIMode.CARD:
-            mouth = ["\\____/", "\\_oo_/", "\\_OO_/", "\\_oo_/"][speak_step]
-            return [
-                "   .-\"\"\"\"\"\"-.   ",
-                " .'  _    _  '. ",
-                " /   (o)  (o)   \\",
-                "|       ▿        |",
-                f"|    {mouth}      |",
-                " \\  .-.__.__-.  /",
-                "  '._  ____  _.' ",
-                "     /_/  \\_\\    ",
-            ]
+            return "response_cached"
+        if self._ui_mode == UIMode.OFFLINE:
+            return "offline"
+        if self._ui_mode == UIMode.ERROR:
+            return "error"
+        if self._device_control.is_muted():
+            return "muted"
+        return "idle"
 
-        # HOME / READY / CONNECTING / ERROR / OFFLINE fallback.
-        eyes = "(-)  (-)" if home_blink else "(o)  (o)"
-        mouth = "\\______/"
-        if self._ui_mode in (UIMode.ERROR, UIMode.OFFLINE):
-            mouth = "\\_~~~~_/"
+    def _state_from_sprite(self, sprite: str | None) -> str | None:
+        if not sprite:
+            return None
+        s = str(sprite).lower()
+        stem = s.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        for state in _ASCII_STATES:
+            if state in stem:
+                return state
+        aliases = {
+            "listen": "listening",
+            "speak": "playing",
+            "ready": "response_cached",
+            "mute": "muted",
+            "safe": "safe_mode",
+            "task": "task_running",
+            "upload": "uploading",
+            "block": "blocked",
+            "offline": "offline",
+            "error": "error",
+            "think": "thinking",
+            "idle": "idle",
+            "confirm": "confirm",
+        }
+        for key, value in aliases.items():
+            if key in stem:
+                return value
+        return None
 
-        return [
-            "   .-\"\"\"\"\"\"-.   ",
-            " .'  _    _  '. ",
-            f" /   {eyes}   \\",
-            "|       ▿        |",
-            f"|    {mouth}    |",
-            " \\  .-.__.__-.  /",
-            "  '._  ____  _.' ",
-            "     /_/  \\_\\    ",
-        ]
+    def _ascii_frames(self, state: str, size: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        if size == "small":
+            return _ASCII_FRAMES_SMALL.get(state, _ASCII_FRAMES_SMALL["idle"])
+        return _ASCII_FRAMES_BIG.get(state, _ASCII_FRAMES_BIG["idle"])
 
     def _draw_character(self) -> None:
         """Draw character state if available."""
@@ -925,8 +1122,8 @@ class HandheldApp:
             return "B=Back  Up/Down=Scroll"
         elif self._ui_mode in (UIMode.HOME, UIMode.READY):
             if self._device_control.is_muted():
-                return "Muted  Start=Menu"
-            return "Up/Down=Select  A=Send  Hold X=Talk  Start=Menu"
+                return "Muted  Start=Menu  Select=Settings"
+            return "Up/Down=Select  A=Send  Hold X=Talk  Start=Menu  Select=Settings"
         elif self._ui_mode == UIMode.MENU:
             return "Up/Down=Select  A=Confirm  B=Cancel"
         elif self._ui_mode in (UIMode.ERROR, UIMode.OFFLINE):

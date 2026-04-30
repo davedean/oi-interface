@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
 # Ensure SDL2 DLL path before any sdl2 import
 os.environ.setdefault("PYSDL2_DLL_PATH", "/usr/lib")
@@ -39,6 +40,9 @@ DEFAULT_CONFIG = {
     "gateway_url": "ws://localhost:8788/datp",
     "device_id": "sbc-handheld-001",
     "device_type": "sbc-handheld",
+    "character_size": "big",
+    "show_progress_messages": True,
+    "show_celebrations": True,
 }
 
 
@@ -52,14 +56,14 @@ def setup_logging():
     return handler
 
 
-def load_config() -> dict:
+def load_config() -> tuple[dict, str]:
     # First: try GAMEDIR/config.json (where launcher writes)
     gamedir_conf = os.path.join(os.path.dirname(_SCRIPT_DIR), "config.json")
     print(f"[config] checking {gamedir_conf}")
     if os.path.isfile(gamedir_conf):
         try:
             with open(gamedir_conf) as fh:
-                return {**DEFAULT_CONFIG, **json.load(fh)}
+                return {**DEFAULT_CONFIG, **json.load(fh)}, gamedir_conf
         except Exception as exc:
             print(f"[config] gamedir config error: {exc}")
 
@@ -69,12 +73,25 @@ def load_config() -> dict:
     if os.path.isfile(path):
         try:
             with open(path) as fh:
-                return {**DEFAULT_CONFIG, **json.load(fh)}
+                return {**DEFAULT_CONFIG, **json.load(fh)}, path
         except Exception as exc:
             print(f"[config] user config error: {exc}")
 
     print("[config] using defaults")
-    return dict(DEFAULT_CONFIG)
+    return dict(DEFAULT_CONFIG), path
+
+
+def save_config(path: str, updates: dict[str, object]) -> None:
+    cfg = dict(DEFAULT_CONFIG)
+    p = Path(path)
+    try:
+        if p.is_file():
+            cfg.update(json.loads(p.read_text()))
+    except Exception:
+        pass
+    cfg.update(updates)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
 
 
 # ------------------------------------------------------------------
@@ -108,7 +125,7 @@ RG351P_BUTTON_MAP = {
 async def main():
     setup_logging()
     logging = __import__("logging").getLogger("__main__")
-    config = load_config()
+    config, config_path = load_config()
     logging.info(f"config loaded: gateway={config['gateway_url']}")
 
     from oi_client.app import HandheldApp
@@ -117,6 +134,10 @@ async def main():
         gateway_url=config["gateway_url"],
         device_id=config["device_id"],
         device_type=config["device_type"],
+        character_size=config.get("character_size", "big"),
+        show_progress_messages=bool(config.get("show_progress_messages", True)),
+        show_celebrations=bool(config.get("show_celebrations", True)),
+        settings_persist=lambda updates: save_config(config_path, updates),
     )
 
     try:
