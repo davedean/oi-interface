@@ -8,7 +8,7 @@ Format (gateway → device line):
   {"type": "command", "payload": {"op": "display.show_status", "args": {"state": "thinking"}}}
 
 Format (event line, for timing markers):
-  {"type": "delay_ms": 500}   -- sleep before next line
+  {"delay_ms": 500}   -- sleep before next line
 
 .. _JSONL: https://jsonlines.org/
 """

@@ -138,5 +138,4 @@ async def test_main_parses_args_and_starts(monkeypatch):
 
 
 def test_streaming_repl_inherits_from_base_and_initializes_fields(repl):
-    assert repl.streaming_active is False
     assert repl.current_response_text == ""

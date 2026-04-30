@@ -49,7 +49,6 @@ class StreamingOiSimREPL(OiSimREPL):
         device_id: str = "oi-sim-repl-001",
     ):
         super().__init__(gateway=gateway, device_id=device_id)
-        self.streaming_active = False
         self.current_response_text = ""
 
     async def _receive_loop(self):

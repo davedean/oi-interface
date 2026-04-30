@@ -260,8 +260,34 @@ async def test_start_success_connects_runs_loop_and_disconnects(monkeypatch, cap
     async def fake_repl_loop():
         repl.running = False
 
+    class FakeTask:
+        def __init__(self, coro):
+            self.coro = coro
+            self.cancel_called = False
+            self.awaited = False
+
+        def cancel(self):
+            self.cancel_called = True
+            self.coro.close()
+
+        def __await__(self):
+            async def _await_task():
+                self.awaited = True
+                if self.cancel_called:
+                    raise asyncio.CancelledError
+                return None
+            return _await_task().__await__()
+
+    created_tasks: list[FakeTask] = []
+
+    def fake_create_task(coro):
+        task = FakeTask(coro)
+        created_tasks.append(task)
+        return task
+
     monkeypatch.setattr(repl, "_receive_loop", fake_receive_loop)
     monkeypatch.setattr(repl, "_repl_loop", fake_repl_loop)
+    monkeypatch.setattr("sim.repl.asyncio.create_task", fake_create_task)
 
     await repl.start()
     out = capsys.readouterr().out
@@ -271,10 +297,13 @@ async def test_start_success_connects_runs_loop_and_disconnects(monkeypatch, cap
     assert "Connecting to ws://fake..." in out
     assert "✓ Connected as abc" in out
     assert "✓ Disconnected" in out
+    assert len(created_tasks) == 1
+    assert created_tasks[0].cancel_called is True
+    assert created_tasks[0].awaited is True
 
 
 @pytest.mark.asyncio
-async def test_repl_loop_handles_eof(monkeypatch):
+async def test_repl_loop_handles_eof_stops_running(monkeypatch):
     repl = OiSimREPL()
     repl.running = True
 
@@ -285,6 +314,8 @@ async def test_repl_loop_handles_eof(monkeypatch):
     monkeypatch.setattr("sim.repl.asyncio.get_event_loop", lambda: FakeLoop())
 
     await repl._repl_loop()
+
+    assert repl.running is False
 
 
 @pytest.mark.asyncio

@@ -78,11 +78,14 @@ class OiSimREPL:
         self.running = True
         self._receive_task = asyncio.create_task(self._receive_loop())
 
-        await self._repl_loop()
-
-        if self.sim:
-            await self.sim.disconnect()
-        print("✓ Disconnected")
+        try:
+            await self._repl_loop()
+        finally:
+            self.running = False
+            await self._stop_receive_task()
+            if self.sim:
+                await self.sim.disconnect()
+            print("✓ Disconnected")
 
     async def _repl_loop(self):
         """Main REPL loop."""
@@ -94,6 +97,7 @@ class OiSimREPL:
                 if line:
                     await self._handle_command(line)
             except EOFError:
+                self.running = False
                 break
             except KeyboardInterrupt:
                 print("\n(Use 'quit' to exit)")
@@ -148,6 +152,18 @@ class OiSimREPL:
                 for command in commands[self._printed_command_count:]:
                     self._print_command(command)
                 self._printed_command_count = len(commands)
+
+    async def _stop_receive_task(self) -> None:
+        """Cancel and await the background receive task if it is running."""
+        if self._receive_task is None:
+            return
+        self._receive_task.cancel()
+        try:
+            await self._receive_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._receive_task = None
 
     def _print_command(self, command: dict[str, Any], *, leading_newline: bool = False) -> None:
         """Print a received command in a compact human-friendly format."""
