@@ -186,6 +186,10 @@ async def test_set_device_character_paths(api):
     ok = response_json(await api._set_device_character(req))
     assert ok == {"ok": True, "device_id": "dev1", "character_pack_id": "robot"}
 
+    req = DummyRequest(match_info={"device_id": "dev1"}, body={"pack_id": None})
+    cleared = response_json(await api._set_device_character(req))
+    assert cleared == {"ok": True, "device_id": "dev1", "character_pack_id": None}
+
 
 @pytest.mark.asyncio
 async def test_route_helpers_and_coding_endpoints(api):

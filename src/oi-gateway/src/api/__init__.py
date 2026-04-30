@@ -334,9 +334,9 @@ class GatewayAPI:
         device_id = request.match_info["device_id"]
         body = await self._read_json(request)
 
-        pack_id = body.get("pack_id")
-        if pack_id is None:
+        if "pack_id" not in body:
             return self._error_response("Missing required field: pack_id")
+        pack_id = body.get("pack_id")
 
         # Check device exists in registry
         registry = self._datp.registry
@@ -347,8 +347,8 @@ class GatewayAPI:
         if info is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
-        # Validate pack exists if a pack service is configured.
-        if self._pack_service is not None:
+        # Validate pack exists if pack_id is provided (not null).
+        if pack_id is not None and self._pack_service is not None:
             pack = self._pack_service.get_pack(pack_id)
             if pack is None:
                 return self._error_response(f"Character pack '{pack_id}' not found", 404)
