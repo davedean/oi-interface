@@ -114,6 +114,20 @@ class TestSSEEndpoint:
         assert b'"type":"init"' in body or b'"devices"' in body
 
 
+def test_dashboard_accepts_injected_state() -> None:
+    state = dashboard_module.DashboardState(max_transcripts=3)
+    dashboard = Dashboard(state=state)
+
+    assert dashboard.state is state
+
+
+def test_get_dashboard_is_a_factory_not_a_singleton() -> None:
+    first = dashboard_module.get_dashboard()
+    second = dashboard_module.get_dashboard()
+
+    assert first is not second
+
+
 class TestStateManagement:
     async def test_on_device_online_updates_state(self, dashboard):
         """Device online event should update internal state."""
@@ -123,9 +137,9 @@ class TestStateManagement:
             "session_id": "sess123",
         })
         
-        assert "test-device" in dashboard._devices
-        assert dashboard._devices["test-device"].online is True
-        assert dashboard._devices["test-device"].device_type == "stick"
+        assert "test-device" in dashboard.state.devices
+        assert dashboard.state.devices["test-device"].online is True
+        assert dashboard.state.devices["test-device"].device_type == "stick"
 
     async def test_on_device_offline_marks_offline(self, dashboard):
         """Device offline event should mark device offline."""
@@ -134,11 +148,11 @@ class TestStateManagement:
             "device_id": "test-device",
             "device_type": "stick",
         })
-        assert dashboard._devices["test-device"].online is True
+        assert dashboard.state.devices["test-device"].online is True
         
         # Then go offline
         dashboard.on_device_offline("test-device")
-        assert dashboard._devices["test-device"].online is False
+        assert dashboard.state.devices["test-device"].online is False
 
     async def test_on_transcript_adds_entry(self, dashboard):
         """Transcript event should add entry to transcript list."""
@@ -147,9 +161,9 @@ class TestStateManagement:
             "stream_id": "stream1",
         })
         
-        assert len(dashboard._transcripts) == 1
-        assert dashboard._transcripts[0].transcript == "Hello world"
-        assert dashboard._transcripts[0].device_id == "test-device"
+        assert len(dashboard.state.transcripts) == 1
+        assert dashboard.state.transcripts[0].transcript == "Hello world"
+        assert dashboard.state.transcripts[0].device_id == "test-device"
 
     async def test_on_agent_response_updates_last_transcript(self, dashboard):
         """Agent response should update matching transcript."""
@@ -163,7 +177,7 @@ class TestStateManagement:
             "stream_id": "stream1",
         })
         
-        assert dashboard._transcripts[0].response == "Hi there!"
+        assert dashboard.state.transcripts[0].response == "Hi there!"
 
     async def test_on_state_updated_updates_device_state(self, dashboard):
         """State update should merge into device state."""
@@ -175,21 +189,21 @@ class TestStateManagement:
             "battery_percent": 85,
         })
         
-        assert dashboard._devices["test-device"].state["mode"] == "listening"
-        assert dashboard._devices["test-device"].state["battery_percent"] == 85
+        assert dashboard.state.devices["test-device"].state["mode"] == "listening"
+        assert dashboard.state.devices["test-device"].state["battery_percent"] == 85
 
     async def test_transcripts_trimmed_to_max(self, dashboard):
         """Transcript list should be trimmed to max size."""
-        dashboard._max_transcripts = 5
+        dashboard.state.max_transcripts = 5
         
         for i in range(10):
             dashboard.on_transcript("test-device", {
                 "cleaned": f"Transcript {i}",
             })
         
-        assert len(dashboard._transcripts) == 5
+        assert len(dashboard.state.transcripts) == 5
         # Should have the last 5
-        assert dashboard._transcripts[-1].transcript == "Transcript 9"
+        assert dashboard.state.transcripts[-1].transcript == "Transcript 9"
 
 
 class TestSnapshot:

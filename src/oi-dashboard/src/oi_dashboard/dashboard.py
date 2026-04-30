@@ -12,6 +12,7 @@ from aiohttp import web
 
 from .fallback_html import INLINE_DASHBOARD_HTML
 from .gateway_api import GatewayApi
+from .poller import DashboardPoller
 from .sse import SseHub
 from .state import DashboardState, DeviceState, TranscriptEntry
 
@@ -53,23 +54,27 @@ class Dashboard:
         port: int = DEFAULT_DASHBOARD_PORT,
         poll_interval: float = 2.0,
         max_transcripts: int = 100,
+        state: DashboardState | None = None,
+        gateway_api: GatewayApi | None = None,
+        sse_hub: SseHub | None = None,
     ) -> None:
         self._api_base = api_base_url.rstrip("/")
-        self._gateway_api = GatewayApi(api_base_url)
         self._host = host
         self._port = port
         self._poll_interval = poll_interval
-        self._max_transcripts = max_transcripts
-
-        self._state = DashboardState(max_transcripts=max_transcripts)
-        self._devices = self._state.devices
-        self._transcripts = self._state.transcripts
-        self._sse_hub = SseHub()
-        self._sse_clients = self._sse_hub.clients
+        self._state = state or DashboardState(max_transcripts=max_transcripts)
+        self._gateway_api = gateway_api or GatewayApi(api_base_url)
+        self._sse_hub = sse_hub or SseHub()
+        self._poller = DashboardPoller(self._gateway_api, self._state)
         self._running = False
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
         self._poll_task: asyncio.Task | None = None
+
+    @property
+    def state(self) -> DashboardState:
+        """Expose the dashboard projection through its dedicated module seam."""
+        return self._state
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -151,10 +156,7 @@ class Dashboard:
 
     async def _api_transcripts(self, _request: web.Request) -> web.Response:
         """Return cached transcript entries."""
-        return self._json_response({
-            "transcripts": self._state.transcript_payloads(self._transcripts[-50:]),
-            "count": len(self._transcripts),
-        })
+        return self._json_response(self._state.transcript_listing())
 
     async def _api_health(self, _request: web.Request) -> web.Response:
         """Proxy to gateway /api/health."""
@@ -225,23 +227,7 @@ class Dashboard:
     async def _poll_gateway_state(self) -> None:
         """Poll gateway API for current state."""
         try:
-            status, data = await self._gateway_api.get_devices()
-            if status != 200:
-                return
-
-            devices = data.get("devices", [])
-            current_ids: set[str] = set()
-            for dev_info in devices:
-                dev_id = dev_info.get("device_id", "")
-                if not dev_id:
-                    continue
-                current_ids.add(dev_id)
-                transition = self._state.apply_polled_device(dev_id, dev_info)
-                if transition is not None:
-                    event_type, payload = transition
-                    self._broadcast(event_type, payload)
-
-            for event_type, payload in self._state.mark_missing_devices_offline(current_ids):
+            for event_type, payload in await self._poller.poll_once():
                 self._broadcast(event_type, payload)
 
         except aiohttp.ClientError as error:
@@ -265,7 +251,6 @@ class Dashboard:
 
     def on_transcript(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle transcript event."""
-        self._state.max_transcripts = self._max_transcripts
         event_payload = self._state.record_transcript(device_id, payload)
         if event_payload is not None:
             self._broadcast("transcript", event_payload)
@@ -279,27 +264,17 @@ class Dashboard:
         self._broadcast("audio_delivered", self._state.record_audio_delivered(device_id, payload))
 
 
-# ------------------------------------------------------------------
-# Module-level singleton
-# ------------------------------------------------------------------
-
-_dashboard: Dashboard | None = None
-
-
 def get_dashboard(
     api_base_url: str | None = None,
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_DASHBOARD_PORT,
 ) -> Dashboard:
-    """Get or create the dashboard singleton."""
-    global _dashboard
-    if _dashboard is None:
-        _dashboard = Dashboard(
-            api_base_url=api_base_url or f"http://{DEFAULT_HOST}:{DEFAULT_API_PORT}",
-            host=host,
-            port=port,
-        )
-    return _dashboard
+    """Build a dashboard instance with the default runtime wiring."""
+    return Dashboard(
+        api_base_url=api_base_url or f"http://{DEFAULT_HOST}:{DEFAULT_API_PORT}",
+        host=host,
+        port=port,
+    )
 
 
 async def run_dashboard(

@@ -99,8 +99,8 @@ class TestDashboardIntegration:
             "device_type": "stick",
         })
         
-        assert "test-device" in dashboard._devices
-        assert dashboard._devices["test-device"].online is True
+        assert "test-device" in dashboard.state.devices
+        assert dashboard.state.devices["test-device"].online is True
 
     async def test_forwards_device_offline_event(self, dashboard):
         """Integration should mark device offline."""
@@ -109,14 +109,14 @@ class TestDashboardIntegration:
         
         # First bring device online
         dashboard.on_device_online("test-device", {"device_id": "test-device"})
-        assert dashboard._devices["test-device"].online is True
+        assert dashboard.state.devices["test-device"].online is True
         
         integration.start()
         
         # Then trigger offline
         mock_bus.emit("registry.device_offline", "test-device", {"device_id": "test-device"})
         
-        assert dashboard._devices["test-device"].online is False
+        assert dashboard.state.devices["test-device"].online is False
 
     async def test_forwards_state_updated_event(self, dashboard):
         """Integration should forward state update events."""
@@ -131,7 +131,7 @@ class TestDashboardIntegration:
             "state": {"mode": "listening"},
         })
         
-        assert dashboard._devices["test-device"].state["mode"] == "listening"
+        assert dashboard.state.devices["test-device"].state["mode"] == "listening"
 
     async def test_forwards_transcript_event(self, dashboard):
         """Integration should forward transcript events."""
@@ -145,8 +145,8 @@ class TestDashboardIntegration:
             "stream_id": "s1",
         })
         
-        assert len(dashboard._transcripts) == 1
-        assert dashboard._transcripts[0].transcript == "Hello"
+        assert len(dashboard.state.transcripts) == 1
+        assert dashboard.state.transcripts[0].transcript == "Hello"
 
     async def test_forwards_agent_response_event(self, dashboard):
         """Integration should forward agent response events."""
@@ -164,7 +164,7 @@ class TestDashboardIntegration:
             "response_text": "Hi there!",
         })
         
-        assert dashboard._transcripts[0].response == "Hi there!"
+        assert dashboard.state.transcripts[0].response == "Hi there!"
 
     async def test_forwards_audio_delivered_event(self, dashboard):
         """Integration should forward audio delivered events to the dashboard."""
@@ -190,10 +190,10 @@ class TestDashboardIntegration:
         integration.start()
         
         # Unknown event type - should not affect state
-        initial_count = len(dashboard._transcripts)
+        initial_count = len(dashboard.state.transcripts)
         mock_bus.emit("unknown.event", "test-device", {"data": "test"})
         
-        assert len(dashboard._transcripts) == initial_count
+        assert len(dashboard.state.transcripts) == initial_count
 
     async def test_handles_raw_state_event(self, dashboard):
         """Integration should handle raw DATP state events."""
@@ -209,5 +209,5 @@ class TestDashboardIntegration:
             "battery_percent": 75,
         })
         
-        assert dashboard._devices["test-device"].state["mode"] == "thinking"
-        assert dashboard._devices["test-device"].state["battery_percent"] == 75
+        assert dashboard.state.devices["test-device"].state["mode"] == "thinking"
+        assert dashboard.state.devices["test-device"].state["battery_percent"] == 75

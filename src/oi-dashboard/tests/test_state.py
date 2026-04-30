@@ -78,3 +78,20 @@ def test_record_state_update_merges_existing_device_state() -> None:
 
     assert state.devices["device1"].state == {"mode": "listening", "battery_percent": 80}
     assert payload == {"device_id": "device1", "state": {"mode": "listening", "battery_percent": 80}}
+
+
+def test_transcript_windows_live_behind_state_interface() -> None:
+    state = DashboardState(max_transcripts=10, snapshot_transcript_limit=2, api_transcript_limit=3)
+    for index in range(4):
+        state.record_transcript("device1", {"cleaned": f"Transcript {index}"})
+
+    snapshot = state.snapshot()
+    api_payload = state.transcript_listing()
+
+    assert [entry["transcript"] for entry in snapshot["transcripts"]] == ["Transcript 2", "Transcript 3"]
+    assert [entry["transcript"] for entry in api_payload["transcripts"]] == [
+        "Transcript 1",
+        "Transcript 2",
+        "Transcript 3",
+    ]
+    assert api_payload["count"] == 4

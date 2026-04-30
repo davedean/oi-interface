@@ -39,9 +39,13 @@ class DashboardState:
     def __init__(
         self,
         max_transcripts: int = 100,
+        snapshot_transcript_limit: int = 20,
+        api_transcript_limit: int = 50,
         now_factory: Callable[[], str] | None = None,
     ) -> None:
         self.max_transcripts = max_transcripts
+        self.snapshot_transcript_limit = snapshot_transcript_limit
+        self.api_transcript_limit = api_transcript_limit
         self.devices: dict[str, DeviceState] = {}
         self.transcripts: list[TranscriptEntry] = []
         self._now_factory = now_factory or self._utc_now_iso
@@ -53,7 +57,7 @@ class DashboardState:
                 device_id: self.device_payload(device)
                 for device_id, device in self.devices.items()
             },
-            "transcripts": self.transcript_payloads(self.transcripts[-20:]),
+            "transcripts": self.transcript_payloads(self.transcripts[-self.snapshot_transcript_limit:]),
             "timestamp": self._now_factory(),
         }
 
@@ -150,6 +154,13 @@ class DashboardState:
                 device.online = False
                 events.append(("device_offline", {"device_id": device_id}))
         return events
+
+    def transcript_listing(self) -> dict[str, Any]:
+        """Return the serialized transcript view used by the HTTP API."""
+        return {
+            "transcripts": self.transcript_payloads(self.transcripts[-self.api_transcript_limit:]),
+            "count": len(self.transcripts),
+        }
 
     def device_payload(self, device: DeviceState) -> dict[str, Any]:
         """Serialize a device state for HTTP/SSE payloads."""
