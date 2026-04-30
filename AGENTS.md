@@ -11,3 +11,7 @@ Oi is a local-first I/O layer for personal agents. Keep changes aligned with dev
 - `src/oi-cli/` — CLI surface over gateway APIs
 - `src/oi-dashboard/` — monitoring/debug UI
 - `src/oi-clients/` — device client implementations/planning
+
+## Logs 
+
+$ find ~/.oi/logs/
