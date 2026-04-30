@@ -318,7 +318,7 @@ class Dashboard:
     def _add_transcript(self, device_id: str, transcript: str, response: str = "", stream_id: str = "") -> None:
         """Add a transcript entry."""
         entry = TranscriptEntry(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=self._utc_now_iso(),
             device_id=device_id,
             transcript=transcript,
             response=response,
