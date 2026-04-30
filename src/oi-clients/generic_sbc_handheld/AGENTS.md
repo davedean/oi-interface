@@ -93,14 +93,30 @@ When changing controls, update:
 
 ## Deployment workflow
 
-From repo root:
+Preferred generic deploy script:
+
+```bash
+./src/oi-clients/generic_sbc_handheld/deploy.sh --host anbernic
+```
+
+Back-compat RG351P wrapper still works:
 
 ```bash
 ./deploy_to_rg351p.sh
 ```
 
-This copies changed `oi_client/*.py` files to:
+Defaults deploy to:
 - `/storage/roms/ports/Oi/oi_client/`
+- `/storage/roms/ports/Oi/capability-profile.json`
+- `/storage/roms/ports/Oi.sh`
+
+Useful options:
+- `--dry-run`
+- `--backup`
+- `--verbose`
+- `--target-root /storage/roms/ports`
+- `--app-dir Oi`
+- `--launcher Oi.sh`
 
 ## Logging location on device
 

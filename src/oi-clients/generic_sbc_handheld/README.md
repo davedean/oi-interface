@@ -55,6 +55,23 @@ Think of this as an **embodied handheld Oi terminal**:
 - `GENERIC_SBC_HANDHELD_PLAN.md` — architecture and phased plan
 - `capability-profile.json` — draft capability shape for gateway registration
 - `runtime_sketch.py` — illustrative Linux user-space runtime skeleton
+- `deploy.sh` — SSH deploy script for PortMaster-style handheld installs
+
+## Deploying to a handheld
+
+Default AmberELEC / PortMaster-style deploy:
+
+```bash
+./src/oi-clients/generic_sbc_handheld/deploy.sh --host anbernic
+```
+
+Useful options:
+
+```bash
+./src/oi-clients/generic_sbc_handheld/deploy.sh --dry-run --host anbernic
+./src/oi-clients/generic_sbc_handheld/deploy.sh --backup --host anbernic
+./src/oi-clients/generic_sbc_handheld/deploy.sh --host anbernic --app-dir Oi --launcher Oi.sh
+```
 
 ## Key implementation insight from `oi-sim`
 
