@@ -73,7 +73,7 @@ oi-project-docs/     ← public specs and architecture docs
 | [`PLAN.md`](PLAN.md) | Project plan and implementation notes |
 | [`TECH_DEBT.md`](TECH_DEBT.md) | Current cleanup and follow-up items |
 | [`ARCH_REVIEW.md`](ARCH_REVIEW.md) | Architecture review notes |
-| [`start-oi.sh`](start-oi.sh) | Launcher for `pi`, `hermes`, and `openclaw` gateway runs |
+| [`start-oi.sh`](start-oi.sh) | Launcher for the gateway plus dashboard (`pi`, `hermes`, and `openclaw` backends) |
 | [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md) | OpenClaw backend setup and local wiring |
 | [`src/oi-gateway/hermes.env.example`](src/oi-gateway/hermes.env.example) | Hermes backend env template |
 | [`src/oi-gateway/openclaw.env.example`](src/oi-gateway/openclaw.env.example) | OpenClaw env template |
@@ -83,9 +83,10 @@ oi-project-docs/     ← public specs and architecture docs
 ## Quick start
 
 ```bash
-# Gateway
-cd src/oi-gateway
-python3 -m oi_gateway
+# Start gateway + dashboard together
+./start-oi.sh start pi
+# dashboard URL: http://localhost:8789
+# LAN URL: http://<this-machine-ip>:8789
 
 # Virtual device
 cd src/oi-sim
@@ -96,9 +97,9 @@ cd src/oi-cli
 python3 -m oi_cli devices
 python3 -m oi_cli route --device oi-sim --text "Hello from Oi"
 
-# Dashboard
+# Dashboard-only (manual)
 cd src/oi-dashboard
-oi-dashboard --api-url http://localhost:8788 --host localhost --port 8789
+oi-dashboard --api-url http://localhost:8788 --host 0.0.0.0 --port 8789
 
 # Full test run
 python3 runtests.py
@@ -113,4 +114,6 @@ The wiring is documented in [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCL
 ./start-oi.sh start pi
 ./start-oi.sh start hermes
 ./start-oi.sh start openclaw
+./start-oi.sh status
+./start-oi.sh logs
 ```
