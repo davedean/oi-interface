@@ -3,14 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
+import aiohttp
 import pytest
-
-# Ensure src is on the path
-dashboard_src = Path(__file__).parent.parent / "src"
-if str(dashboard_src) not in __import__("sys").path:
-    __import__("sys").path.insert(0, str(dashboard_src))
 
 from oi_dashboard.dashboard import Dashboard
 
@@ -39,10 +34,6 @@ async def retry_request(coro, max_attempts=15, delay=0.2):
     for attempt in range(max_attempts):
         try:
             return await coro()
-        except (ConnectionRefusedError, ConnectionResetError, asyncio.TimeoutError) as e:
-            last_error = e
-            if attempt < max_attempts - 1:
-                await asyncio.sleep(delay * (attempt + 1))
         except Exception as e:
             last_error = e
             if attempt < max_attempts - 1:
@@ -50,18 +41,29 @@ async def retry_request(coro, max_attempts=15, delay=0.2):
     raise last_error
 
 
+def dashboard_url(dashboard: Dashboard, path: str) -> str:
+    """Build a URL for the running test dashboard."""
+    return f"http://{dashboard._host}:{dashboard._port}{path}"
+
+
+async def fetch_json(dashboard: Dashboard, path: str) -> tuple[int, dict[str, object]]:
+    """Fetch JSON from the dashboard and return status plus parsed body."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(dashboard_url(dashboard, path), timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            return resp.status, await resp.json()
+
+
+async def fetch_text(dashboard: Dashboard, path: str) -> str:
+    """Fetch a text response from the dashboard."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(dashboard_url(dashboard, path), timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            return await resp.text()
+
+
 class TestHealthEndpoint:
     async def test_health_proxies_gateway_errors_as_502(self, dashboard):
         """Health endpoint should surface unreachable gateway as a 502 JSON error."""
-        import aiohttp
-
-        async def make_request():
-            url = f"http://{dashboard._host}:{dashboard._port}/api/health"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    return resp.status, await resp.json()
-
-        status, data = await retry_request(make_request)
+        status, data = await retry_request(lambda: fetch_json(dashboard, "/api/health"))
         assert status == 502
         assert "error" in data
 
@@ -69,15 +71,7 @@ class TestHealthEndpoint:
 class TestDevicesEndpoint:
     async def test_devices_endpoint_surfaces_gateway_errors_as_502(self, dashboard):
         """Devices endpoint should surface unreachable gateway as a 502 JSON error."""
-        import aiohttp
-
-        async def make_request():
-            url = f"http://{dashboard._host}:{dashboard._port}/api/devices"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    return resp.status, await resp.json()
-
-        status, data = await retry_request(make_request)
+        status, data = await retry_request(lambda: fetch_json(dashboard, "/api/devices"))
         assert status == 502
         assert "error" in data
 
@@ -85,15 +79,7 @@ class TestDevicesEndpoint:
 class TestTranscriptsEndpoint:
     async def test_transcripts_returns_empty_initially(self, dashboard):
         """Transcripts endpoint should return empty list initially."""
-        import aiohttp
-        
-        async def make_request():
-            url = f"http://{dashboard._host}:{dashboard._port}/api/transcripts"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    return await resp.json()
-        
-        data = await retry_request(make_request)
+        _, data = await retry_request(lambda: fetch_json(dashboard, "/api/transcripts"))
         assert "transcripts" in data
         assert "count" in data
 
@@ -101,15 +87,7 @@ class TestTranscriptsEndpoint:
 class TestIndexEndpoint:
     async def test_index_returns_html(self, dashboard):
         """Index endpoint should return HTML page."""
-        import aiohttp
-        
-        async def make_request():
-            url = f"http://{dashboard._host}:{dashboard._port}/"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    return await resp.text()
-        
-        content = await retry_request(make_request)
+        content = await retry_request(lambda: fetch_text(dashboard, "/"))
         assert "<html" in content.lower() or "<!doctype" in content.lower()
         assert "Dashboard" in content
 
@@ -117,23 +95,19 @@ class TestIndexEndpoint:
 class TestSSEEndpoint:
     async def test_sse_returns_init_event(self, dashboard):
         """SSE endpoint should return initial state on connect."""
-        import aiohttp
-        
         async def make_request():
-            url = f"http://{dashboard._host}:{dashboard._port}/events"
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
+                async with session.get(dashboard_url(dashboard, "/events")) as resp:
                     assert resp.status == 200
                     assert resp.headers.get("Content-Type") == "text/event-stream"
-                    
-                    # Read SSE data
+
                     body = b""
                     async for chunk in resp.content.iter_any():
                         body += chunk
                         if b"event: init" in body:
                             break
                     return body
-        
+
         body = await retry_request(make_request, max_attempts=5)
         assert b"event: init" in body
         assert b'"type":"init"' in body or b'"devices"' in body
@@ -240,14 +214,6 @@ class TestSnapshot:
 class TestProxyRequests:
     async def test_proxy_returns_502_on_gateway_unreachable(self, dashboard):
         """Proxy should return 502 when gateway is unreachable."""
-        import aiohttp
-        
-        async def make_request():
-            url = f"http://{dashboard._host}:{dashboard._port}/api/health"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    return await resp.json()
-        
         # The dashboard was configured with unreachable API URL
-        data = await retry_request(make_request)
+        _, data = await retry_request(lambda: fetch_json(dashboard, "/api/health"))
         assert "error" in data

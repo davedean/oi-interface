@@ -5,15 +5,9 @@ These tests use a mock EventBus to avoid requiring gateway dependencies.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from unittest.mock import MagicMock, call
 
 import pytest
-
-# Ensure dashboard src is on the path
-dashboard_src = Path(__file__).parent.parent / "src"
-if str(dashboard_src) not in __import__("sys").path:
-    __import__("sys").path.insert(0, str(dashboard_src))
 
 from oi_dashboard.dashboard import Dashboard
 from oi_dashboard.gateway_integration import DashboardIntegration

@@ -4,14 +4,7 @@ from __future__ import annotations
 import argparse
 import sys
 from io import StringIO
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
-
-
-# Ensure src is on the path
-_dashboard_src = Path(__file__).parent.parent / "src"
-if str(_dashboard_src) not in __import__("sys").path:
-    __import__("sys").path.insert(0, str(_dashboard_src))
 
 from oi_dashboard import cli
 
