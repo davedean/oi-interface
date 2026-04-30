@@ -153,18 +153,20 @@ class TestDashboardIntegration:
         assert dashboard._transcripts[0].response == "Hi there!"
 
     async def test_forwards_audio_delivered_event(self, dashboard):
-        """Integration should forward audio delivered events."""
+        """Integration should forward audio delivered events to the dashboard."""
         mock_bus = MockEventBus()
         integration = DashboardIntegration(dashboard, mock_bus)
-        
+        dashboard.on_audio_delivered = MagicMock()
+
         integration.start()
-        
-        # Should not raise
+
         mock_bus.emit("audio_delivered", "test-device", {
             "response_id": "resp1",
         })
-        
-        # No state changes expected, just no errors
+
+        dashboard.on_audio_delivered.assert_called_once_with("test-device", {
+            "response_id": "resp1",
+        })
 
     async def test_ignores_unknown_event_types(self, dashboard):
         """Integration should ignore unknown event types."""

@@ -1,0 +1,10 @@
+[run]
+branch = True
+omit =
+    */tests/*
+    */.venv/*
+    */generic_sbc_handheld/oi_client/lib/websockets/*
+
+[report]
+show_missing = True
+skip_covered = False

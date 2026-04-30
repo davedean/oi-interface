@@ -93,11 +93,9 @@ class TestHermesMQTTAdapter:
             mock_client.on_connect = set_connected
 
             # We need to mock the connection to succeed
-            with patch("asyncio.to_thread") as mock_to_thread:
-                # Make connect succeed
-                mock_to_thread.return_value = AsyncMock()()
-                # Actually run it but mock the underlying
+            with patch("asyncio.to_thread", side_effect=lambda fn, *a, **kw: fn(*a, **kw)):
                 mock_client.connect.return_value = None
+                mock_client.loop_start.return_value = None
 
                 # Manually set connected for test
                 adapter._connected = True
