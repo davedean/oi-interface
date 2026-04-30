@@ -357,7 +357,7 @@ class MultiDeviceManager:
         """
         now = self._get_time()
         expires_at = None
-        if expires_seconds:
+        if expires_seconds is not None:
             from datetime import timedelta
             expires_at = now + timedelta(seconds=expires_seconds)
 

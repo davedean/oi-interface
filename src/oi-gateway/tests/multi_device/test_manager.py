@@ -534,6 +534,17 @@ class TestMultiDeviceManagerEdgeCases:
         )
         assert affinity.expires_at is not None
 
+    def test_set_affinity_with_zero_expiry(self):
+        """Test zero-second expiry is treated as an immediate expiry."""
+        now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        manager = MultiDeviceManager(get_current_time=lambda: now)
+        affinity = manager.set_affinity(
+            "user-001",
+            "stick-001",
+            expires_seconds=0,
+        )
+        assert affinity.expires_at == now
+
     def test_get_all_groups_empty(self):
         """Test get_all_groups when no groups."""
         manager = MultiDeviceManager()
