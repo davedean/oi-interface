@@ -262,7 +262,7 @@ class TestOiSimUnitCoverage:
     @pytest.mark.parametrize(
         ("method_name", "args", "expected_payload"),
         [
-            ("tap", (), {"event": "button.tap", "button": "main"}),
+            ("tap", (), {"event": "button.pressed", "button": "main"}),
             ("press_button", (), {"event": "button.pressed", "button": "main"}),
             ("send_playback_started", ("resp-1",), {"event": "audio.playback_started", "response_id": "resp-1"}),
             ("send_battery_low", (), {"event": "battery_low", "battery_percent": 10}),

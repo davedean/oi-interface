@@ -47,8 +47,8 @@ class OiSimDeviceAPI:
         })
 
     async def tap(self: OiSim) -> None:
-        """Send button.tap event (stop playback when playing)."""
-        await self._send("event", {"event": "button.tap", "button": "main"})
+        """Backward-compatible alias for a short button press."""
+        await self.press_button()
 
     async def press_button(self: OiSim) -> None:
         """Send button.pressed event for a short button press."""

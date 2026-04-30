@@ -33,7 +33,7 @@ class TraceEvent:
 # ------------------------------------------------------------------
 
 DEFAULT_CAPABILITIES: dict[str, Any] = {
-    "input": ["hold_to_record", "double_tap", "tap", "button_confirm"],
+    "input": ["hold_to_record", "double_tap", "button_confirm"],
     "output": ["tiny_screen", "cached_audio", "character"],
     "sensors": ["battery", "wifi_rssi"],
     "commands_supported": [
