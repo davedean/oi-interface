@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 #
-# Deploy Oi handheld client to RG351P / AmberELEC-style devices.
+# Fast deploy for the Oi handheld client on RG351P / AmberELEC-style devices.
 #
 # Usage:
 #   ./deploy_to_rg351p.sh [--dry-run] [--backup] [--host HOST] [--no-launcher]
 #
-# Default host: anbernic
+# Strategy:
+#   1. Prefer rsync for fast incremental syncs.
+#   2. Fall back to tar-over-ssh if rsync isn't available on the device.
 #
 
 set -euo pipefail
@@ -91,52 +93,66 @@ copy_file() {
     fi
 }
 
-remote_md5() {
-    local path="$1"
+have_remote_rsync() {
     if [[ "$DRY_RUN" == true ]]; then
         return 0
     fi
-    ssh "$HOST" "md5sum '$path' 2>/dev/null | awk '{print \$1}'" 2>/dev/null || true
+    ssh "$HOST" "command -v rsync >/dev/null 2>&1"
 }
 
-copy_if_changed() {
-    local src="$1"
-    local dst="$2"
-    local label="$3"
-    local local_hash remote_hash
+sync_client_with_rsync() {
+    local -a cmd=(
+        rsync -az --delete --itemize-changes
+        --exclude='__pycache__/'
+        --exclude='*.pyc'
+        --exclude='*.pyo'
+        --exclude='*.so'
+        --exclude='oi.log'
+        "${SOURCE_CLIENT_DIR}/"
+        "${HOST}:${TARGET_CLIENT_DIR}/"
+    )
 
-    if [[ ! -f "$src" ]]; then
-        echo "  [WARN] missing local file: ${src}"
-        return 1
+    echo "=== Syncing oi_client runtime (rsync) ==="
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] ${cmd[*]}"
+        return 0
     fi
+    echo "[EXEC] ${cmd[*]}"
+    "${cmd[@]}"
+}
 
-    local_hash="$(md5sum "$src" | awk '{print $1}')"
-    remote_hash="$(remote_md5 "$dst")"
+sync_client_with_tar() {
+    echo "=== Syncing oi_client runtime (tar fallback) ==="
 
-    if [[ "$local_hash" == "$remote_hash" && -n "$remote_hash" ]]; then
-        echo "  [SKIP] ${label}"
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] tar client tree to ${HOST}:${TARGET_CLIENT_DIR}"
+        echo "[DRY-RUN] remote prune: keep oi.log, remove rest of ${TARGET_CLIENT_DIR}"
         return 0
     fi
 
-    echo "  [COPY] ${label}"
-    copy_file "$src" "$dst"
+    run_ssh "mkdir -p '${TARGET_CLIENT_DIR}'"
+    run_ssh "find '${TARGET_CLIENT_DIR}' -mindepth 1 ! -path '${TARGET_CLIENT_DIR}/oi.log' -delete"
+
+    tar \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='*.pyo' \
+        --exclude='*.so' \
+        --exclude='oi.log' \
+        -C "$SOURCE_CLIENT_DIR" -czf - . \
+        | ssh "$HOST" "tar -xzf - -C '${TARGET_CLIENT_DIR}'"
 }
 
-verify_match() {
-    local src="$1"
-    local dst="$2"
-    local label="$3"
-    local local_hash remote_hash
+verify_exists() {
+    local path="$1"
+    local label="$2"
 
     if [[ "$DRY_RUN" == true ]]; then
         echo "  [DRY-RUN] verify ${label}"
         return 0
     fi
 
-    local_hash="$(md5sum "$src" | awk '{print $1}')"
-    remote_hash="$(remote_md5 "$dst")"
-
-    if [[ "$local_hash" == "$remote_hash" && -n "$remote_hash" ]]; then
+    if ssh "$HOST" "test -f '$path'"; then
         echo "  [OK] ${label}"
     else
         echo "  [FAIL] ${label}"
@@ -156,6 +172,7 @@ echo ""
 [[ -d "$SOURCE_ROOT" ]] || { echo "ERROR: Source root not found: ${SOURCE_ROOT}" >&2; exit 1; }
 [[ -d "$SOURCE_CLIENT_DIR" ]] || { echo "ERROR: Source client dir not found: ${SOURCE_CLIENT_DIR}" >&2; exit 1; }
 [[ -f "$SOURCE_LAUNCHER" ]] || { echo "ERROR: Launcher not found: ${SOURCE_LAUNCHER}" >&2; exit 1; }
+[[ -f "$SOURCE_CAPABILITY_PROFILE" ]] || { echo "ERROR: Capability profile not found: ${SOURCE_CAPABILITY_PROFILE}" >&2; exit 1; }
 
 if [[ "$DRY_RUN" == true ]]; then
     echo "[DRY-RUN] Skipping connectivity check"
@@ -176,48 +193,17 @@ if [[ "$DO_BACKUP" == true ]]; then
     echo ""
 fi
 
-echo "=== Syncing oi_client runtime ==="
-mapfile -t CLIENT_FILES < <(cd "$SOURCE_CLIENT_DIR" && find . -type f \
-    ! -path './__pycache__/*' \
-    ! -path './lib/__pycache__/*' \
-    ! -name '*.pyc' \
-    ! -name '*.pyo' \
-    ! -name '*.so' \
-    ! -name 'oi.log' | sort)
-
-for rel in "${CLIENT_FILES[@]}"; do
-    rel="${rel#./}"
-    src="${SOURCE_CLIENT_DIR}/${rel}"
-    dst="${TARGET_CLIENT_DIR}/${rel}"
-    dst_dir="$(dirname "$dst")"
-    run_ssh "mkdir -p '${dst_dir}'"
-    copy_if_changed "$src" "$dst" "oi_client/${rel}"
-done
-
-echo ""
-echo "=== Pruning stale runtime files ==="
-if [[ "$DRY_RUN" == true ]]; then
-    echo "  [DRY-RUN] skip remote prune"
+if have_remote_rsync; then
+    sync_client_with_rsync
 else
-    declare -A LOCAL_CLIENT_SET=()
-    for rel in "${CLIENT_FILES[@]}"; do
-        LOCAL_CLIENT_SET["${rel#./}"]=1
-    done
-    while IFS= read -r remote_rel; do
-        remote_rel="${remote_rel#./}"
-        [[ -n "$remote_rel" ]] || continue
-        if [[ -z "${LOCAL_CLIENT_SET[$remote_rel]+x}" ]]; then
-            echo "  [DELETE] oi_client/${remote_rel}"
-            run_ssh "rm -f '${TARGET_CLIENT_DIR}/${remote_rel}'"
-        fi
-    done < <(ssh "$HOST" "cd '${TARGET_CLIENT_DIR}' && find . -type f ! -name 'oi.log' ! -name '*.pyc' ! -name '*.pyo' | sort")
+    sync_client_with_tar
 fi
 
 echo ""
 echo "=== Syncing top-level runtime files ==="
-copy_if_changed "$SOURCE_CAPABILITY_PROFILE" "${TARGET_DIR}/capability-profile.json" "Oi/capability-profile.json"
+copy_file "$SOURCE_CAPABILITY_PROFILE" "${TARGET_DIR}/capability-profile.json"
 if [[ "$DEPLOY_LAUNCHER" == true ]]; then
-    copy_if_changed "$SOURCE_LAUNCHER" "$TARGET_LAUNCHER" "Oi.sh"
+    copy_file "$SOURCE_LAUNCHER" "$TARGET_LAUNCHER"
     run_ssh "chmod +x '${TARGET_LAUNCHER}'"
 fi
 
@@ -227,13 +213,15 @@ run_ssh "find '${TARGET_CLIENT_DIR}' -type d -name '__pycache__' -prune -exec rm
 
 echo ""
 echo "=== Verifying critical runtime files ==="
-verify_match "${SOURCE_CLIENT_DIR}/app.py" "${TARGET_CLIENT_DIR}/app.py" "oi_client/app.py"
-verify_match "${SOURCE_CLIENT_DIR}/datp.py" "${TARGET_CLIENT_DIR}/datp.py" "oi_client/datp.py"
-verify_match "${SOURCE_CLIENT_DIR}/capabilities.py" "${TARGET_CLIENT_DIR}/capabilities.py" "oi_client/capabilities.py"
-verify_match "${SOURCE_CLIENT_DIR}/device_control.py" "${TARGET_CLIENT_DIR}/device_control.py" "oi_client/device_control.py"
-verify_match "${SOURCE_CLIENT_DIR}/telemetry.py" "${TARGET_CLIENT_DIR}/telemetry.py" "oi_client/telemetry.py"
+verify_exists "${TARGET_CLIENT_DIR}/app.py" "oi_client/app.py"
+verify_exists "${TARGET_CLIENT_DIR}/datp.py" "oi_client/datp.py"
+verify_exists "${TARGET_CLIENT_DIR}/capabilities.py" "oi_client/capabilities.py"
+verify_exists "${TARGET_CLIENT_DIR}/device_control.py" "oi_client/device_control.py"
+verify_exists "${TARGET_CLIENT_DIR}/telemetry.py" "oi_client/telemetry.py"
+verify_exists "${TARGET_CLIENT_DIR}/lib/websockets/__init__.py" "oi_client/lib/websockets/__init__.py"
+verify_exists "${TARGET_DIR}/capability-profile.json" "Oi/capability-profile.json"
 if [[ "$DEPLOY_LAUNCHER" == true ]]; then
-    verify_match "$SOURCE_LAUNCHER" "$TARGET_LAUNCHER" "Oi.sh"
+    verify_exists "$TARGET_LAUNCHER" "Oi.sh"
 fi
 
 echo ""
