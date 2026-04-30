@@ -224,7 +224,7 @@ class SkillExecutor:
         SkillResult
             Result of the execution.
         """
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             None,
             self._execute_sync,
             skill_code,
@@ -557,7 +557,7 @@ class SkillSandbox:
                 execution_time=0.0,
             )
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
 
         try:
             # Create execution context
@@ -577,15 +577,15 @@ class SkillSandbox:
                 parameters,
             )
 
-            execution_time = asyncio.get_event_loop().time() - start_time
-            
+            execution_time = asyncio.get_running_loop().time() - start_time
+
             # Add execution time to result
             result.execution_time = execution_time
 
             return result
 
         except asyncio.TimeoutError:
-            execution_time = asyncio.get_event_loop().time() - start_time
+            execution_time = asyncio.get_running_loop().time() - start_time
             logger.error("Skill execution timed out: %s", skill_name)
             return SkillResult(
                 success=False,
@@ -594,7 +594,7 @@ class SkillSandbox:
             )
 
         except Exception as e:
-            execution_time = asyncio.get_event_loop().time() - start_time
+            execution_time = asyncio.get_running_loop().time() - start_time
             logger.error("Skill execution failed: %s - %s", skill_name, e)
             return SkillResult(
                 success=False,

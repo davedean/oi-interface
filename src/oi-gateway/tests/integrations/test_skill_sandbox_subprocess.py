@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pytest
-import asyncio
 
 from integrations.skill_sandbox import (
     Skill,
@@ -10,10 +9,7 @@ from integrations.skill_sandbox import (
     SkillExecutor,
     ToolBroker,
     RiskLevel,
-    ToolPermission,
-    ToolPermissions,
     SkillValidationError,
-    SkillResult,
 )
 
 
