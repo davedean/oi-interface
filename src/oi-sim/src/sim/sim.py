@@ -745,24 +745,12 @@ class OiSim:
     # ------------------------------------------------------------------
 
     async def simulate_network_error(self, message: str = "Network unavailable") -> None:
-        """Simulate a network-related error.
-
-        Parameters
-        ----------
-        message : str
-            Error message description.
-        """
-        await self.send_device_error("NETWORK_ERROR", message)
+        """Simulate a network-related error."""
+        await self._simulate_error("NETWORK_ERROR", message)
 
     async def simulate_storage_error(self, message: str = "Storage operation failed") -> None:
-        """Simulate a storage-related error.
-
-        Parameters
-        ----------
-        message : str
-            Error message description.
-        """
-        await self.send_device_error("STORAGE_ERROR", message)
+        """Simulate a storage-related error."""
+        await self._simulate_error("STORAGE_ERROR", message)
 
     def _reset_for_reconnect(self) -> None:
         """Reset reconnect-sensitive local state before a fresh hello/session."""
@@ -830,55 +818,33 @@ class OiSim:
             handle.write(json.dumps(_trace_event_payload(event)) + "\n")
 
     async def simulate_audio_error(self, message: str = "Audio playback failed") -> None:
-        """Simulate an audio-related error.
-
-        Parameters
-        ----------
-        message : str
-            Error message description.
-        """
-        await self.send_device_error("AUDIO_ERROR", message)
+        """Simulate an audio-related error."""
+        await self._simulate_error("AUDIO_ERROR", message)
 
     async def simulate_wifi_error(self, message: str = "WiFi connection failed") -> None:
-        """Simulate a WiFi-related error.
-
-        Parameters
-        ----------
-        message : str
-            Error message description.
-        """
-        await self.send_device_error("WIFI_ERROR", message)
+        """Simulate a WiFi-related error."""
+        await self._simulate_error("WIFI_ERROR", message)
 
     async def simulate_timeout_error(self, message: str = "Operation timed out") -> None:
-        """Simulate a timeout error.
-
-        Parameters
-        ----------
-        message : str
-            Error message description.
-        """
-        await self.send_device_error("TIMEOUT", message)
+        """Simulate a timeout error."""
+        await self._simulate_error("TIMEOUT", message)
 
     async def simulate_invalid_state(self, message: str = "Invalid state for operation") -> None:
-        """Simulate an invalid state error (device enters ERROR state).
-
-        Parameters
-        ----------
-        message : str
-            Error message description.
-        """
-        self._state_machine.transition(State.ERROR)
-        await self.send_device_error("INVALID_STATE", message)
+        """Simulate an invalid-state error and move the device into ERROR."""
+        await self._simulate_error("INVALID_STATE", message, transition_to_error=True)
 
     async def simulate_critical_error(self, code: str, message: str) -> None:
-        """Simulate a critical error that puts device into ERROR state.
+        """Simulate a critical error and move the device into ERROR."""
+        await self._simulate_error(code, message, transition_to_error=True)
 
-        Parameters
-        ----------
-        code : str
-            Error code (e.g., 'CRITICAL_BATTERY', 'HARDWARE_FAILURE')
-        message : str
-            Human-readable error message.
-        """
-        self._state_machine.transition(State.ERROR)
+    async def _simulate_error(
+        self,
+        code: str,
+        message: str,
+        *,
+        transition_to_error: bool = False,
+    ) -> None:
+        """Send a device error, optionally transitioning the state machine first."""
+        if transition_to_error:
+            self._state_machine.transition(State.ERROR)
         await self.send_device_error(code, message)
