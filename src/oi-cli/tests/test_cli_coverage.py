@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import sys
 import urllib.error
@@ -49,6 +48,20 @@ def test_apiclient_get_uses_base_url_without_trailing_slash() -> None:
 
     assert result == {"ok": True}
     urlopen.assert_called_once_with("http://example.test/api/health", timeout=5)
+
+
+def test_apiclient_get_exits_on_http_error_with_json_body() -> None:
+    client = APIClient("http://example.test")
+    error = FakeHTTPError(body=b'{"error": "not allowed"}', code=403, reason="forbidden")
+
+    with patch.object(oi_cli.logger, "error") as log_error:
+        with patch("urllib.request.urlopen", side_effect=error):
+            with pytest.raises(SystemExit) as exc:
+                client.get("/api/health")
+
+    assert exc.value.code == 1
+    log_error.assert_called_once_with("API error (%d): %s", 403, "not allowed")
+
 
 
 def test_apiclient_get_exits_on_urlerror() -> None:
@@ -172,16 +185,6 @@ def test_build_parser_supports_debug_and_subcommands() -> None:
     assert parsed.command == "audio-play"
     assert parsed.device == "dev1"
     assert parsed.response_id == "resp1"
-
-
-def test_main_returns_one_for_unknown_command_branch() -> None:
-    parser = MagicMock()
-    parser.parse_args.return_value = Namespace(command="bogus", debug=False, api_url="http://test")
-
-    with patch("oi_cli.build_parser", return_value=parser):
-        assert main([]) == 1
-
-    parser.print_help.assert_called_once()
 
 
 def test_main_reraises_systemexit_from_command_handler() -> None:

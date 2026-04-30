@@ -379,15 +379,29 @@ class TestCLICommands:
     def test_api_url_override(self):
         """Test that --api-url overrides the default API base."""
         client = MockClient({
-            "GET:/custom/api/health": {"status": "ok", "datp_running": True, "devices_online": 0, "timestamp": ""}
+            "GET:/api/health": {"status": "ok", "datp_running": True, "devices_online": 0, "timestamp": ""}
         })
-        code, out, err = self._run(
-            ["--api-url", "http://custom:9999", "status"],
-            client,
-        )
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+            with patch("oi_cli.APIClient", return_value=client) as api_client:
+                code = main(["--api-url", "http://custom:9999", "status"])
         assert code == 0
-        # Client was initialized with base_url from args
-        assert len(client.calls) == 1
+        api_client.assert_called_once_with("http://custom:9999")
+        assert client.calls == [("GET", "/api/health", None)]
+
+    def test_api_url_override_after_subcommand(self):
+        client = MockClient({
+            "GET:/api/health": {"status": "ok", "datp_running": True, "devices_online": 0, "timestamp": ""}
+        })
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+            with patch("oi_cli.APIClient", return_value=client) as api_client:
+                code = main(["status", "--api-url", "http://custom:9999"])
+        assert code == 0
+        api_client.assert_called_once_with("http://custom:9999")
+        assert client.calls == [("GET", "/api/health", None)]
 
 
 # ------------------------------------------------------------------
@@ -397,33 +411,16 @@ class TestCLICommands:
 
 class TestArgParsing:
     def test_missing_command_shows_help(self):
-        # argparse exits with code 2 on missing required args
-        with patch.object(sys, "argv", ["oi"]):
-            with patch.object(sys, "stdout", StringIO()):
-                code = main([])
-        # argparse exits with code 2; we convert to 1
-        assert code == 1 or code == 2
+        assert main([]) == 2
 
     def test_missing_device_arg(self):
-        # argparse exits with code 2 on missing required --device
-        with patch.object(sys, "argv", ["oi", "show-status", "--state", "thinking"]):
-            with patch.object(sys, "stdout", StringIO()):
-                code = main([])
-        assert code >= 1  # should fail
+        assert main(["show-status", "--state", "thinking"]) == 2
 
     def test_missing_minutes_arg(self):
-        # argparse exits with code 2 on missing required --minutes
-        with patch.object(sys, "argv", ["oi", "mute", "--device", "oi-sim"]):
-            with patch.object(sys, "stdout", StringIO()):
-                code = main([])
-        assert code >= 1  # should fail
+        assert main(["mute", "--device", "oi-sim"]) == 2
 
     def test_missing_text_arg(self):
-        # argparse exits with code 2 on missing required --text
-        with patch.object(sys, "argv", ["oi", "route", "--device", "oi-sim"]):
-            with patch.object(sys, "stdout", StringIO()):
-                code = main([])
-        assert code >= 1  # should fail
+        assert main(["route", "--device", "oi-sim"]) == 2
 
 
 # ------------------------------------------------------------------
@@ -475,6 +472,12 @@ class TestHumanEdgeCases:
         output = format_human_command(result)
         assert "resp_123" in output
         assert "audio.play" in output
+        assert "State: playing" in output
+        assert "Chunks sent: 10" in output
+        assert "Label:" not in output
+        assert "Minutes:" not in output
+        assert "Until:" not in output
+        assert "Text:" not in output
 
 
 # ------------------------------------------------------------------
@@ -487,10 +490,10 @@ class TestErrorHandling:
         client = MockClient({
             "GET:/api/devices": {"error": "Device not found"}
         })
-        with patch.object(sys, "argv", ["oi", "--api-url", "http://test", "devices"]):
-            with patch.object(sys, "stdout", StringIO()):
-                with patch.object(sys, "stderr", StringIO()):
-                    with patch("oi_cli.APIClient", return_value=client):
-                        code = main()
-        # Client returns the error dict; main prints it and exits
-        assert code == 0 or code == 1  # depends on how we handle errors
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+            with patch("oi_cli.APIClient", return_value=client):
+                code = main(["devices"])
+        assert code == 0
+        assert json.loads(stdout.getvalue()) == {"error": "Device not found"}
