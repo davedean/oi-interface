@@ -30,6 +30,12 @@ from sdl2.sdlttf import TTF_Init, TTF_Quit, TTF_OpenFont, TTF_CloseFont, TTF_Ren
 
 # Try a few system fonts
 _FONT_CANDIDATES = [
+    # Prefer monospace so ASCII character art aligns correctly.
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+    "/usr/share/retroarch-assets/fonts/DejaVuSansMono.ttf",
+    # Fallbacks
     "/usr/share/retroarch-assets/fonts/OpenSans-Regular.ttf",
     "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
     "/usr/share/retroarch-assets/fonts/DejaVuSans.ttf",

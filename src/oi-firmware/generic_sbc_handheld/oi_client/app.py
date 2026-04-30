@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import glob
 import os
+import tempfile
+import logging
 from dataclasses import dataclass
 from enum import Enum
 import uuid
@@ -48,6 +50,9 @@ class CardData:
     body: str = ""
 
 
+logger = logging.getLogger(__name__)
+
+
 class HandheldApp:
     def __init__(self, gateway_url: str, device_id: str, device_type: str) -> None:
         self.gateway_url = gateway_url
@@ -75,14 +80,25 @@ class HandheldApp:
         # Recording / audio cache state
         self._recording_stream_id: str | None = None
         self._recording_chunks: list[bytes] = []
+        self._recording_format: str = "pcm16"
+        self._recording_sample_rate: int = 16000
+        self._recording_channels: int = 1
         self._recording_start_time: float = 0.0
+
+        # Outbound mic-stream state
+        self._record_tx_stream_id: str | None = None
+        self._record_tx_seq: int = 0
 
         # Per-response audio tracking: maps response_id -> wav_path
         self._response_audio: dict[str, str] = {}
 
         # Menu
         self._menu_idx = 0
-        self._menu_items = ["Quit", "Reconnect"]
+        self._menu_items = ["Reload", "Reconnect", "Quit"]
+
+        # X-button press tracking
+        self._x_long_press_seen = False
+        self._x_pre_recording = False
 
         # Character display state (default to IDLE placeholder)
         self._character_sprite: str | None = "idle"
@@ -173,7 +189,8 @@ class HandheldApp:
         # Main loop (~30fps)
         while self._running:
             await self._tick()
-        
+
+        logger.warning("Main loop exiting: running=%s ui_mode=%s online=%s", self._running, self._ui_mode, self._online)
         await self.shutdown()
 
     async def shutdown(self) -> None:
@@ -231,28 +248,35 @@ class HandheldApp:
     # ------------------------------------------------------------------
 
     async def _tick(self) -> None:
-        # Process input
-        for event in self.input.poll():
-            await self._handle_input(event)
+        try:
+            # Process input
+            for event in self.input.poll():
+                logger.debug("input event type=%s name=%s action=%s raw=%s mode=%s", event.type, event.name, event.action, event.raw, self._ui_mode)
+                await self._handle_input(event)
 
-        # Process DATP commands
-        if self.datp:
-            for cmd in self.datp.get_commands():
-                self._handle_command(cmd)
-            # Check connection status
-            if not self.datp.is_connected and self._online:
-                self._online = False
-                self._ui_mode = UIMode.OFFLINE
+            # Process DATP commands
+            if self.datp:
+                for cmd in self.datp.get_commands():
+                    self._handle_command(cmd)
+                # Check connection status
+                if not self.datp.is_connected and self._online:
+                    self._online = False
+                    self._ui_mode = UIMode.OFFLINE
 
-        # Draw
-        self._draw_frame()
-        self._spinner_frame += 1
+            # Draw
+            self._draw_frame()
+            self._spinner_frame += 1
 
-        # Stream recorded audio chunks if actively recording
-        await self._stream_recorded_audio()
+            # Stream recorded audio chunks if actively recording
+            await self._stream_recorded_audio()
 
-        # Sleep for ~33ms (30fps)
-        await asyncio.sleep(0.033)
+            # Sleep for ~33ms (30fps)
+            await asyncio.sleep(0.033)
+        except Exception as exc:
+            logger.exception("tick failure: %s", exc)
+            self._ui_mode = UIMode.ERROR
+            self._card.title = "Runtime error"
+            self._card.body = str(exc)
 
     async def _stream_recorded_audio(self) -> None:
         """Read any newly recorded PCM audio and stream it to gateway."""
@@ -260,9 +284,9 @@ class HandheldApp:
             return
         chunk = self.audio.read_recording()
         if chunk and self.datp and self.datp.is_connected and self._ui_mode == UIMode.RECORDING:
-            stream_id = f"rec_{int(self._recording_start_time * 1000)}"
-            # We don't track seq here since chunking is coarse
-            await self.datp.send_audio_chunk(stream_id, 0, chunk, 16000)
+            stream_id = self._record_tx_stream_id or f"rec_{int(self._recording_start_time * 1000)}"
+            await self.datp.send_audio_chunk(stream_id, self._record_tx_seq, chunk, 16000)
+            self._record_tx_seq += 1
             self._card.title = "Recording"
             self._card.body = f"Streaming audio… {len(chunk)} bytes"
 
@@ -272,15 +296,55 @@ class HandheldApp:
 
     async def _handle_input(self, ev: InputEvent) -> None:
         if ev.type == "quit":
-            self._running = False
+            # SDL_QUIT can be emitted spuriously on some handheld stacks.
+            # Ignore it in-device and rely on explicit menu Quit instead.
+            logger.warning("Ignoring SDL quit event")
             return
 
         # Handle long-press recording controls before generic pressed gating.
-        if ev.name == "a" and ev.action == "long_press" and self._ui_mode in (UIMode.HOME, UIMode.READY):
-            await self.start_recording()
+        if ev.name == "x" and ev.action == "pressed" and self._ui_mode in (UIMode.HOME, UIMode.READY):
+            # Start capture immediately so early speech isn't lost; only publish if long-press confirms.
+            self._card.title = "Voice"
+            self._card.body = "Hold X…"
+            if not self.audio.is_recording:
+                if self.audio.recording_init() and self.audio.start_recording():
+                    self._x_pre_recording = True
+                else:
+                    self._card.title = "Voice"
+                    self._card.body = "Mic not available"
+                    self._ui_mode = UIMode.ERROR
             return
-        if ev.name == "a" and ev.action == "long_release" and self.audio.is_recording:
+
+        if ev.name == "x" and ev.action == "long_press" and self._ui_mode in (UIMode.HOME, UIMode.READY):
+            self._x_long_press_seen = True
+            ok = await self.start_recording()
+            if not ok:
+                self._card.title = "Voice"
+                self._card.body = "Mic not available"
+                self._ui_mode = UIMode.ERROR
+            return
+        if ev.name == "x" and ev.action == "long_release" and self.audio.is_recording:
             await self.stop_recording()
+            self._x_long_press_seen = False
+            return
+
+        # Short-press A should fire on release, not press, to avoid accidental sends.
+        if ev.name == "a" and ev.action == "released" and self._ui_mode in (UIMode.HOME, UIMode.READY):
+            if self._ui_mode != UIMode.RECORDING:
+                prompt = CANNED_PROMPTS[self._prompt_idx]
+                await self._send_prompt(prompt)
+            return
+
+        # Reset long-press guard when X is released without recording active.
+        if ev.name == "x" and ev.action == "released":
+            # If long-press wasn't reached, discard any speculative pre-recording.
+            if not self._x_long_press_seen and self.audio.is_recording:
+                self.audio.stop_recording()
+                self._x_pre_recording = False
+            if not self.audio.is_recording and self._ui_mode in (UIMode.HOME, UIMode.READY):
+                self._card.title = "Oi"
+                self._card.body = "Select a prompt"
+            self._x_long_press_seen = False
             return
 
         if ev.action != "pressed":
@@ -296,19 +360,7 @@ class HandheldApp:
             return
 
         if self._ui_mode in (UIMode.HOME, UIMode.READY):
-            if ev.name == "a":
-                if ev.action == "long_press":
-                    # Start recording on long press of A
-                    await self.start_recording()
-                elif ev.action == "pressed":
-                    # Short press: send selected prompt (only if not recording)
-                    if self._ui_mode != UIMode.RECORDING:
-                        prompt = CANNED_PROMPTS[self._prompt_idx]
-                        await self._send_prompt(prompt)
-                elif ev.action == "long_release":
-                    # Stop recording on release after long press
-                    await self.stop_recording()
-            elif ev.name == "b":
+            if ev.name == "b":
                 if self._ui_mode == UIMode.RECORDING:
                     # Cancel recording
                     await self.stop_recording()
@@ -347,12 +399,16 @@ class HandheldApp:
                     self._online = ok
                     self._ui_mode = UIMode.READY if ok else UIMode.ERROR
             elif ev.name == "b":
+                logger.warning("Exiting due to B in %s mode", self._ui_mode)
                 self._running = False
 
     async def _handle_menu(self, name: str) -> None:
         if name == "a":
             item = self._menu_items[self._menu_idx]
-            if item == "Quit":
+            if item == "Reload":
+                await self._reload_process()
+            elif item == "Quit":
+                logger.warning("Exiting due to menu Quit")
                 self._running = False
             elif item == "Reconnect":
                 self._ui_mode = UIMode.CONNECTING
@@ -448,21 +504,79 @@ class HandheldApp:
         elif op == "audio.cache.put_begin":
             self._recording_stream_id = args.get("stream_id", f"stream_{uuid.uuid4().hex[:8]}")
             self._recording_chunks = []
+            self._recording_format = str(args.get("format", "pcm16") or "pcm16").lower()
+            self._recording_sample_rate = int(args.get("sample_rate", 16000) or 16000)
+            self._recording_channels = int(args.get("channels", 1) or 1)
+            logger.info(
+                "audio.begin stream_id=%s response_id=%s format=%s sr=%s ch=%s",
+                self._recording_stream_id,
+                args.get("response_id", "latest"),
+                self._recording_format,
+                self._recording_sample_rate,
+                self._recording_channels,
+            )
 
         elif op == "audio.cache.put_chunk":
             import base64
-            chunk = base64.b64decode(args.get("data_b64", ""))
+            try:
+                chunk = base64.b64decode(args.get("data_b64", ""))
+            except Exception:
+                chunk = b""
             if chunk:
                 self._recording_chunks.append(chunk)
+                logger.debug(
+                    "audio.chunk stream_id=%s seq=%s bytes=%d total_chunks=%d",
+                    self._recording_stream_id,
+                    args.get("seq"),
+                    len(chunk),
+                    len(self._recording_chunks),
+                )
 
         elif op == "audio.cache.put_end":
-            if self._recording_chunks:
-                combined = b''.join(self._recording_chunks)
-                wav = self.audio.save_wav(combined)
-                response_id = args.get("response_id", "latest")
-                self._response_audio[response_id] = str(wav)
-                self.audio.play(str(wav))
-                self._recording_chunks = []
+            if not self._recording_chunks:
+                logger.warning("audio.end with no chunks stream_id=%s response_id=%s", self._recording_stream_id, args.get("response_id", "latest"))
+                self._card.title = "Audio"
+                self._card.body = "No audio chunks received"
+                self._ui_mode = UIMode.CARD
+                return
+
+            combined = b"".join(self._recording_chunks)
+
+            # Gateway currently sends PCM chunks even when format is "wav_pcm16".
+            # Treat only explicit WAV container formats as already-headered audio.
+            fmt = self._recording_format
+            is_wav_container = fmt in {"wav", "audio/wav", "wave"}
+
+            if is_wav_container:
+                fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="oi_audio_")
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(combined)
+                wav = wav_path
+            else:
+                wav = str(self.audio.save_wav(
+                    combined,
+                    sample_rate=self._recording_sample_rate,
+                    channels=self._recording_channels,
+                ))
+
+            response_id = args.get("response_id", "latest")
+            self._response_audio[response_id] = wav
+            logger.info(
+                "audio.end stream_id=%s response_id=%s format=%s chunks=%d total_bytes=%d wav=%s",
+                self._recording_stream_id,
+                response_id,
+                fmt,
+                len(self._recording_chunks),
+                len(combined),
+                wav,
+            )
+            played = self.audio.play(wav)
+            logger.info("audio.play response_id=%s path=%s ok=%s", response_id, wav, played)
+            if not played:
+                self._card.title = "Audio"
+                self._card.body = f"Playback failed ({fmt}, {len(combined)} bytes)"
+                self._ui_mode = UIMode.CARD
+            self._recording_chunks = []
 
         elif op == "audio.play":
             response_id = args.get("response_id", "latest")
@@ -569,27 +683,61 @@ class HandheldApp:
         self.renderer.present()
 
     def _ascii_blob_lines(self) -> list[str]:
-        """Return an animated ASCII blob based on current UI mode/state."""
+        """Return a Kirby-inspired animated ASCII character for current UI mode."""
         import time
-        blink = int(time.time() * 1.2) % 8 == 0
-        step = int(time.time() * 3) % 2
 
-        eye = "- -" if blink else "o o"
-        mouth = "_" if self._ui_mode in (UIMode.READY, UIMode.HOME, UIMode.CARD) else "o"
+        t = time.time()
+
+        # HOME/READY: mostly still, occasional blink.
+        home_blink = int(t * 1.1) % 10 == 0
+
+        # WAITING: subtle left/right shuffle.
+        wait_step = int(t * 3.0) % 2
+
+        # SPEAKING (shown while response card is active): mouth movement cycle.
+        speak_step = int(t * 6.0) % 4
+
+        if self._ui_mode in (UIMode.WAITING, UIMode.RECORDING):
+            feet = "    _/ /  \\ \\_" if wait_step == 0 else "   _/ /  \\ \\_ "
+            return [
+                "   .-\"\"\"\"\"\"-.   ",
+                " .'  _    _  '. ",
+                " /   (o)  (o)   \\",
+                "|       ▿        |",
+                "|    \\______/    |",
+                " \\  .-.__.__-.  /",
+                "  '._  ____  _.' ",
+                feet,
+            ]
+
+        if self._ui_mode == UIMode.CARD:
+            mouth = ["\\____/", "\\_oo_/", "\\_OO_/", "\\_oo_/"][speak_step]
+            return [
+                "   .-\"\"\"\"\"\"-.   ",
+                " .'  _    _  '. ",
+                " /   (o)  (o)   \\",
+                "|       ▿        |",
+                f"|    {mouth}      |",
+                " \\  .-.__.__-.  /",
+                "  '._  ____  _.' ",
+                "     /_/  \\_\\    ",
+            ]
+
+        # HOME / READY / CONNECTING / ERROR / OFFLINE fallback.
+        eyes = "(-)  (-)" if home_blink else "(o)  (o)"
+        mouth = "\\______/"
         if self._ui_mode in (UIMode.ERROR, UIMode.OFFLINE):
-            mouth = "~"
-        if self._ui_mode == UIMode.WAITING:
-            mouth = "."
-
-        arm_l = "<" if step == 0 else "("
-        arm_r = ">" if step == 0 else ")"
+            mouth = "\\_~~~~_/"
 
         return [
-            "   .-''''-.   ",
-            f"  /  {eye}  \\  ",
-            f" |    {mouth}    | ",
-            f"  \\  ____  /  ",
-            f"   {arm_l}____{arm_r}   ",
+            "   .-\"\"\"\"\"\"-.   ",
+            " .'  _    _  '. ",
+            f" /   {eyes}   \\",
+            "|       ▿        |",
+            f"|    {mouth}    |",
+            " \\  .-.__.__-.  /",
+            "  '._  ____  _.' ",
+            "     /_/  \\_\\    ",
         ]
 
     def _draw_character(self) -> None:
@@ -627,8 +775,8 @@ class HandheldApp:
             if has_audio:
                 return "A=Replay  B=Back  Up/Down=Scroll"
             return "B=Back  Up/Down=Scroll"
-        elif self._ui_mode == UIMode.HOME:
-            return "Up/Down=Select  A=Send  Start=Menu"
+        elif self._ui_mode in (UIMode.HOME, UIMode.READY):
+            return "Up/Down=Select  A=Send  Hold X=Talk  Start=Menu"
         elif self._ui_mode == UIMode.MENU:
             return "Up/Down=Select  A=Confirm  B=Cancel"
         elif self._ui_mode in (UIMode.ERROR, UIMode.OFFLINE):
@@ -663,33 +811,64 @@ class HandheldApp:
     # ------------------------------------------------------------------
 
     async def start_recording(self) -> bool:
-        """Start voice recording and streaming to gateway."""
+        """Promote active capture into a published voice stream."""
         if not self.datp or not self.datp.is_connected:
             return False
-        if self.audio.is_recording:
-            return True
-        if not self.audio.recording_init():
-            return False
-        ok = self.audio.start_recording()
-        if ok:
-            self._ui_mode = UIMode.RECORDING
-            self._recording_start_time = time.time()
-        return ok
+        if not self.audio.is_recording:
+            if not self.audio.recording_init():
+                self._card.title = "Recording"
+                self._card.body = "No audio input device found"
+                self._ui_mode = UIMode.ERROR
+                return False
+            if not self.audio.start_recording():
+                return False
+
+        self._ui_mode = UIMode.RECORDING
+        self._recording_start_time = time.time()
+        self._record_tx_stream_id = f"rec_{int(self._recording_start_time * 1000)}"
+        self._record_tx_seq = 0
+
+        # Immediately flush any speculative pre-recorded audio so early speech
+        # (spoken before long-press threshold) is preserved.
+        pending = self.audio.read_recording()
+        if pending and self.datp and self.datp.is_connected:
+            await self.datp.send_audio_chunk(self._record_tx_stream_id, self._record_tx_seq, pending, 16000)
+            self._record_tx_seq += 1
+
+        self._x_pre_recording = False
+        self._card.title = "Recording"
+        self._card.body = "Listening… hold X to talk"
+        return True
 
     async def stop_recording(self) -> None:
         """Stop voice recording and send final event."""
         if not self.audio.is_recording:
             return
         duration_ms = int((time.time() - self._recording_start_time) * 1000)
+
+        # Drain any queued audio before closing capture device.
+        pending = self.audio.read_recording()
         self.audio.stop_recording()
-        # Send any remaining chunks
-        chunk = self.audio.read_recording()
-        if chunk and self.datp and self.datp.is_connected:
-            stream_id = f"rec_{int(self._recording_start_time * 1000)}"
-            await self.datp.send_audio_chunk(stream_id, 0, chunk, 16000)
+
+        stream_id = self._record_tx_stream_id or f"rec_{int(self._recording_start_time * 1000)}"
+        if pending and self.datp and self.datp.is_connected:
+            await self.datp.send_audio_chunk(stream_id, self._record_tx_seq, pending, 16000)
+            self._record_tx_seq += 1
+
+        if self.datp and self.datp.is_connected:
             await self.datp.send_recording_finished(stream_id, duration_ms)
-        self._ui_mode = UIMode.READY if self._online else UIMode.OFFLINE
+
+        self._record_tx_stream_id = None
+        self._record_tx_seq = 0
+        self._x_pre_recording = False
+        self._ui_mode = UIMode.WAITING if self._online else UIMode.OFFLINE
+
+    async def _reload_process(self) -> None:
+        """Reload the app process so newly deployed files are picked up."""
+        import sys
+        await self.shutdown()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def _is_recording_button(self, name: str, action: str) -> bool:
-        """Check if this is a recording trigger (button A long-press)."""
-        return name == "a" and action in ("long_press", "long_release")
+        """Check if this is a recording trigger (button X long-press)."""
+        return name == "x" and action in ("long_press", "long_release")
