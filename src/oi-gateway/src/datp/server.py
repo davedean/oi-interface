@@ -158,6 +158,8 @@ class DATPServer:
         if msg_type == "hello":
             await self._handle_hello(ws, msg_dict)
         elif msg_type == "event":
+            if await self._maybe_handle_conversation_update(ws, msg_dict):
+                return device_id
             self.event_bus.emit("event", device_id, msg_dict["payload"])
         elif msg_type == "audio_chunk":
             self.event_bus.emit("audio_chunk", device_id, msg_dict["payload"])
@@ -201,6 +203,118 @@ class DATPServer:
         conversation = entry.get("conversation")
         return conversation if isinstance(conversation, dict) else {}
 
+    async def _maybe_handle_conversation_update(self, ws, msg: dict[str, Any]) -> bool:
+        payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+        if payload.get("event") != "conversation.update":
+            return False
+
+        device_id = msg.get("device_id", "")
+        requested_conversation = payload.get("conversation") if isinstance(payload.get("conversation"), dict) else {}
+        updated = await self.update_device_conversation(
+            device_id,
+            backend_id=requested_conversation.get("backend_id"),
+            agent_id=requested_conversation.get("agent_id"),
+            session_key=requested_conversation.get("session_key"),
+            notify_device=True,
+        )
+        if updated is None:
+            error = build_error(
+                device_id=device_id,
+                code="UNKNOWN_DEVICE",
+                message="Device must complete hello before updating conversation",
+                related_id=msg.get("id"),
+            )
+            await ws.send(json.dumps(error))
+        return True
+
+    def _resolve_conversation(
+        self,
+        device_id: str,
+        requested_conversation: dict[str, Any] | None = None,
+        *,
+        current_conversation: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        requested = requested_conversation or {}
+        current = current_conversation or {}
+
+        available_backend_ids = {
+            str(item.get("id"))
+            for item in self.available_backends
+            if isinstance(item, dict) and item.get("id")
+        }
+        available_agent_ids = {
+            str(agent.get("id"))
+            for agent in self.available_agents
+            if isinstance(agent, dict) and agent.get("id")
+        }
+
+        backend_candidate = requested.get("backend_id", current.get("backend_id"))
+        if backend_candidate in available_backend_ids:
+            selected_backend = backend_candidate
+        else:
+            selected_backend = self.default_backend_id
+
+        default_agent_id = (self.default_agent or {}).get("id")
+        agent_candidate = requested.get("agent_id", current.get("agent_id"))
+        if agent_candidate in available_agent_ids:
+            selected_agent_id = agent_candidate
+        else:
+            selected_agent_id = default_agent_id
+
+        selected_agent = next(
+            (agent for agent in self.available_agents if isinstance(agent, dict) and agent.get("id") == selected_agent_id),
+            self.default_agent,
+        )
+        selected_session_key = (
+            requested.get("session_key")
+            or current.get("session_key")
+            or f"oi:device:{device_id}"
+        )
+        return {
+            "backend_id": selected_backend,
+            "agent_id": selected_agent_id,
+            "session_key": selected_session_key,
+        }, selected_agent
+
+    async def update_device_conversation(
+        self,
+        device_id: str,
+        *,
+        backend_id: str | None = None,
+        agent_id: str | None = None,
+        session_key: str | None = None,
+        notify_device: bool = False,
+    ) -> dict[str, Any] | None:
+        entry = self.device_registry.get(device_id)
+        if entry is None:
+            return None
+
+        conversation, selected_agent = self._resolve_conversation(
+            device_id,
+            {
+                "backend_id": backend_id,
+                "agent_id": agent_id,
+                "session_key": session_key,
+            },
+            current_conversation=self.get_device_conversation(device_id),
+        )
+        entry["conversation"] = conversation
+
+        if notify_device:
+            ack = build_hello_ack(
+                session_id=entry.get("session_id", f"sess_{secrets.token_hex(8)}"),
+                device_id=device_id,
+                default_agent=self.default_agent,
+                available_agents=self.available_agents,
+                available_backends=self.available_backends,
+                selected_backend=conversation.get("backend_id"),
+                selected_agent=selected_agent,
+                selected_session_key=conversation.get("session_key"),
+            )
+            await entry["ws"].send(json.dumps(ack))
+
+        return conversation
+
     async def _handle_hello(self, ws, msg: dict[str, Any]) -> None:
         """Process a hello handshake, register device, and send hello_ack."""
         device_id = msg["device_id"]
@@ -229,18 +343,7 @@ class DATPServer:
         # TODO (Step 3+): resume_token support.
         #   If resume_token is provided, look up the previous session and
         #   restore state rather than starting fresh.
-        available_backend_ids = {str(item.get("id")) for item in self.available_backends if isinstance(item, dict) and item.get("id")}
-        requested_backend = requested_conversation.get("backend_id")
-        selected_backend = requested_backend if requested_backend in available_backend_ids else self.default_backend_id
-        available_agent_ids = {str(agent.get("id")) for agent in self.available_agents if isinstance(agent, dict) and agent.get("id")}
-        requested_agent_id = requested_conversation.get("agent_id")
-        default_agent_id = (self.default_agent or {}).get("id")
-        selected_agent_id = requested_agent_id if requested_agent_id in available_agent_ids else default_agent_id
-        selected_agent = next(
-            (agent for agent in self.available_agents if isinstance(agent, dict) and agent.get("id") == selected_agent_id),
-            self.default_agent,
-        )
-        selected_session_key = requested_conversation.get("session_key") or f"oi:device:{device_id}"
+        conversation, selected_agent = self._resolve_conversation(device_id, requested_conversation)
 
         entry: DeviceEntry = {
             "ws": ws,
@@ -248,11 +351,7 @@ class DATPServer:
             "capabilities": payload.get("capabilities", {}),
             "resume_token": payload.get("resume_token"),
             "nonce": payload.get("nonce"),
-            "conversation": {
-                "backend_id": selected_backend,
-                "agent_id": selected_agent_id,
-                "session_key": selected_session_key,
-            },
+            "conversation": conversation,
         }
         self.device_registry[device_id] = entry
 
@@ -262,9 +361,9 @@ class DATPServer:
             default_agent=self.default_agent,
             available_agents=self.available_agents,
             available_backends=self.available_backends,
-            selected_backend=selected_backend,
+            selected_backend=conversation.get("backend_id"),
             selected_agent=selected_agent,
-            selected_session_key=selected_session_key,
+            selected_session_key=conversation.get("session_key"),
         )
         await ws.send(json.dumps(ack))
         logger.info("device registered: device_id=%r session_id=%r", device_id, session_id)

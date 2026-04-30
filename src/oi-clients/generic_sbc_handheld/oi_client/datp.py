@@ -195,7 +195,18 @@ class DatpClient:
         msg_type = msg.get("type", "")
         payload = msg.get("payload", {})
 
-        if msg_type == "command":
+        if msg_type == "hello_ack":
+            self._session_id = payload.get("session_id") or self._session_id
+            self._server_info = msg
+            if payload.get("selected_backend") is not None:
+                self._backend_id = payload.get("selected_backend")
+            selected_agent = payload.get("selected_agent") if isinstance(payload.get("selected_agent"), dict) else None
+            if selected_agent and (selected_agent.get("id") or selected_agent.get("name")):
+                self._agent_id = str(selected_agent.get("id") or selected_agent.get("name"))
+            if payload.get("selected_session_key") is not None:
+                self._preferred_session_key = payload.get("selected_session_key")
+
+        elif msg_type == "command":
             op = payload.get("op", "")
             args = payload.get("args", {})
             queued = {
@@ -265,6 +276,23 @@ class DatpClient:
 
     async def send_text_prompt(self, text: str) -> None:
         await self._send("event", {"event": "text.prompt", "text": text, "nonce": secrets.token_hex(8)})
+
+    async def send_conversation_update(
+        self,
+        *,
+        backend_id: str | None = None,
+        agent_id: str | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        self.update_conversation(
+            backend_id=backend_id if backend_id is not None else self._backend_id,
+            agent_id=agent_id if agent_id is not None else self._agent_id,
+            session_key=session_key if session_key is not None else self._preferred_session_key,
+        )
+        await self._send("event", {
+            "event": "conversation.update",
+            "conversation": {k: v for k, v in self.conversation.items() if v is not None},
+        })
 
     async def send_state_report(self, **extra_fields: Any) -> None:
         payload: dict[str, Any] = {

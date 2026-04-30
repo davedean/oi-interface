@@ -119,6 +119,48 @@ async def test_handle_error_transitions_to_error_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_hello_ack_updates_server_info_mid_session() -> None:
+    client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
+
+    await client._handle_message({
+        "type": "hello_ack",
+        "payload": {
+            "session_id": "sess-1",
+            "selected_backend": "codex",
+            "selected_session_key": "oi:session:new",
+        },
+    })
+
+    assert client.server_info["payload"]["selected_backend"] == "codex"
+    assert client.server_info["payload"]["selected_session_key"] == "oi:session:new"
+
+
+@pytest.mark.asyncio
+async def test_send_conversation_update_emits_event_payload() -> None:
+    client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
+    ws = FakeWebSocket()
+    client._ws = ws
+
+    await client.send_conversation_update(backend_id="codex", agent_id="build", session_key="oi:session:new")
+
+    msg = ws.sent_messages[-1]
+    assert msg["type"] == "event"
+    assert msg["payload"] == {
+        "event": "conversation.update",
+        "conversation": {
+            "backend_id": "codex",
+            "agent_id": "build",
+            "session_key": "oi:session:new",
+        },
+    }
+    assert client.conversation == {
+        "backend_id": "codex",
+        "agent_id": "build",
+        "session_key": "oi:session:new",
+    }
+
+
+@pytest.mark.asyncio
 async def test_send_audio_chunk_encodes_pcm_as_base64() -> None:
     client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
     ws = FakeWebSocket()

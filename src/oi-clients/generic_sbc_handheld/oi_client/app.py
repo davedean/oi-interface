@@ -688,6 +688,20 @@ class HandheldApp:
         self._persist_settings()
         if reconnect and self.datp:
             self._ui_mode = UIMode.CONNECTING
+            if self.datp.is_connected:
+                try:
+                    await self.datp.send_conversation_update(
+                        backend_id=self._preferred_backend_id,
+                        agent_id=self._preferred_agent_id,
+                        session_key=self._preferred_session_key,
+                    )
+                    self._sync_connection_preferences_from_server()
+                    self._online = True
+                    self._ui_mode = UIMode.READY
+                    self._card.body = "Connection updated"
+                    return True
+                except Exception:
+                    pass
             ok = await self.datp.reconnect()
             if ok:
                 self._sync_connection_preferences_from_server()

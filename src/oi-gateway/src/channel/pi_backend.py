@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 import os
@@ -116,11 +117,17 @@ class SubprocessPiBackend(AgentBackend):
                 metadata={"event_type": "complete"},
             )
 
+    def _events_from_prompt(self, message: str, agent_id: str | None = None) -> AsyncGenerator[AgentStreamChunk, None]:
+        params = inspect.signature(self._read_events_from_prompt).parameters
+        if "agent_id" in params:
+            return self._read_events_from_prompt(message, agent_id=agent_id)
+        return self._read_events_from_prompt(message)
+
     async def send_prompt(self, message: str, agent_id: str | None = None) -> str:
         """Backward-compatible helper for tests and legacy callers."""
         response_text = ""
         got_any = False
-        async for chunk in self._read_events_from_prompt(message, agent_id=agent_id):
+        async for chunk in self._events_from_prompt(message, agent_id=agent_id):
             if chunk.text_delta:
                 if chunk.is_final:
                     response_text = chunk.text_delta
@@ -136,7 +143,7 @@ class SubprocessPiBackend(AgentBackend):
     async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
         """Send a request and yield streaming text chunks."""
         message = render_text_prompt(request)
-        async for chunk in self._read_events_from_prompt(message, agent_id=request.agent_id):
+        async for chunk in self._events_from_prompt(message, agent_id=request.agent_id):
             yield chunk
 
     async def _write_prompt(self, proc: asyncio.subprocess.Process, message: str) -> None:

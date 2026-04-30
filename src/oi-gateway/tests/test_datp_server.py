@@ -159,6 +159,89 @@ async def test_hello_handshake_includes_conversation_preferences(server):
 
 
 @pytest.mark.asyncio
+async def test_conversation_update_event_switches_backend_and_session_without_reconnect(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent, {"id": "build", "name": "Build"}]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws:
+        await ws.send(json.dumps(make_hello("switch-device")))
+        hello_ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        session_id = hello_ack["payload"]["session_id"]
+
+        await ws.send(json.dumps({
+            "v": "datp",
+            "type": "event",
+            "id": "evt_switch_1",
+            "device_id": "switch-device",
+            "ts": "2026-04-27T04:41:00.000Z",
+            "payload": {
+                "event": "conversation.update",
+                "conversation": {
+                    "backend_id": "codex",
+                    "agent_id": "build",
+                    "session_key": "oi:session:switched",
+                },
+            },
+        }))
+
+        update_ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        assert update_ack["type"] == "hello_ack"
+        assert update_ack["payload"]["session_id"] == session_id
+        assert update_ack["payload"]["selected_backend"] == "codex"
+        assert update_ack["payload"]["selected_agent"]["id"] == "build"
+        assert update_ack["payload"]["selected_session_key"] == "oi:session:switched"
+        assert server.get_device_conversation("switch-device") == {
+            "backend_id": "codex",
+            "agent_id": "build",
+            "session_key": "oi:session:switched",
+        }
+
+
+@pytest.mark.asyncio
+async def test_device_conversation_updates_are_isolated_per_device(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent, {"id": "build", "name": "Build"}]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws_a, websockets.connect(f"ws://localhost:{server.port}/datp") as ws_b:
+        await ws_a.send(json.dumps(make_hello("device-a")))
+        await ws_b.send(json.dumps(make_hello("device-b")))
+        await asyncio.wait_for(ws_a.recv(), timeout=5.0)
+        await asyncio.wait_for(ws_b.recv(), timeout=5.0)
+
+        await ws_b.send(json.dumps({
+            "v": "datp",
+            "type": "event",
+            "id": "evt_switch_b",
+            "device_id": "device-b",
+            "ts": "2026-04-27T04:42:00.000Z",
+            "payload": {
+                "event": "conversation.update",
+                "conversation": {
+                    "backend_id": "codex",
+                    "agent_id": "build",
+                    "session_key": "oi:session:b",
+                },
+            },
+        }))
+        await asyncio.wait_for(ws_b.recv(), timeout=5.0)
+
+        assert server.get_device_conversation("device-a") == {
+            "backend_id": "pi",
+            "agent_id": "main",
+            "session_key": "oi:device:device-a",
+        }
+        assert server.get_device_conversation("device-b") == {
+            "backend_id": "codex",
+            "agent_id": "build",
+            "session_key": "oi:session:b",
+        }
+
+
+@pytest.mark.asyncio
 async def test_event_emit(server):
     """Connect, subscribe to event bus, send an event, assert callback was called."""
     received: list[tuple[str, str, dict]] = []

@@ -105,6 +105,54 @@ async def test_health_device_info_and_transcript_listing(api):
 
 
 @pytest.mark.asyncio
+async def test_device_conversation_endpoints(api):
+    device_id = "dev1"
+    api._datp.device_registry[device_id] = {
+        "device_id": device_id,
+        "session_id": "sess-1",
+        "capabilities": {},
+        "conversation": {
+            "backend_id": "pi",
+            "agent_id": "main",
+            "session_key": "oi:device:dev1",
+        },
+    }
+    api._datp.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+    api._datp.default_backend_id = "pi"
+    api._datp.default_agent = {"id": "main", "name": "Main"}
+    api._datp.available_agents = [api._datp.default_agent, {"id": "build", "name": "Build"}]
+    api._datp.get_device_conversation = lambda device_id: api._datp.device_registry[device_id]["conversation"]
+    api._datp.update_device_conversation = AsyncMock(return_value={
+        "backend_id": "codex",
+        "agent_id": "build",
+        "session_key": "oi:session:new",
+    })
+
+    current = response_json(await api._device_conversation_info(DummyRequest(match_info={"device_id": device_id})))
+    assert current["device_id"] == device_id
+    assert current["conversation"]["backend_id"] == "pi"
+    assert current["available_backends"][1]["id"] == "codex"
+
+    updated = response_json(await api._update_device_conversation(DummyRequest(match_info={"device_id": device_id}, body={
+        "backend_id": "codex",
+        "agent_id": "build",
+        "session_key": "oi:session:new",
+    })))
+    assert updated["ok"] is True
+    assert updated["conversation"]["backend_id"] == "codex"
+    api._datp.update_device_conversation.assert_awaited_once_with(
+        device_id,
+        backend_id="codex",
+        agent_id="build",
+        session_key="oi:session:new",
+        notify_device=True,
+    )
+
+    missing = await api._device_conversation_info(DummyRequest(match_info={"device_id": "missing"}))
+    assert missing.status == 404
+
+
+@pytest.mark.asyncio
 async def test_command_endpoints_validation_and_success(api):
     device_id = "dev1"
     api._datp.device_registry[device_id] = {"device_id": device_id}

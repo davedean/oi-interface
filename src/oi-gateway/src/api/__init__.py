@@ -126,6 +126,8 @@ class GatewayAPI:
             ("GET", "/api/devices", self._devices_list),
             ("GET", "/api/transcripts", self._transcripts_list),
             ("GET", "/api/devices/{device_id}", self._device_info),
+            ("GET", "/api/devices/{device_id}/conversation", self._device_conversation_info),
+            ("POST", "/api/devices/{device_id}/conversation", self._update_device_conversation),
             ("POST", "/api/devices/{device_id}/commands/show_status", self._cmd_show_status),
             ("POST", "/api/devices/{device_id}/commands/mute_until", self._cmd_mute_until),
             ("POST", "/api/devices/{device_id}/commands/audio_play", self._cmd_audio_play),
@@ -315,6 +317,44 @@ class GatewayAPI:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
         return self._json_response(self._build_device_info(entry, device_id=device_id))
+
+    async def _device_conversation_info(self, request: web.Request) -> web.Response:
+        device_id = request.match_info["device_id"]
+        entry = self._require_registered_device(device_id)
+        if entry is None:
+            return self._error_response(f"Device '{device_id}' not found", 404)
+
+        return self._json_response({
+            "device_id": device_id,
+            "conversation": self._datp.get_device_conversation(device_id),
+            "available_backends": getattr(self._datp, "available_backends", []),
+            "default_backend_id": getattr(self._datp, "default_backend_id", None),
+            "available_agents": getattr(self._datp, "available_agents", []),
+            "default_agent": getattr(self._datp, "default_agent", None),
+        })
+
+    async def _update_device_conversation(self, request: web.Request) -> web.Response:
+        device_id = request.match_info["device_id"]
+        if self._require_registered_device(device_id) is None:
+            return self._error_response(f"Device '{device_id}' not found", 404)
+
+        body = await self._read_json(request)
+        conversation = body.get("conversation") if isinstance(body.get("conversation"), dict) else body
+        updated = await self._datp.update_device_conversation(
+            device_id,
+            backend_id=conversation.get("backend_id"),
+            agent_id=conversation.get("agent_id"),
+            session_key=conversation.get("session_key"),
+            notify_device=True,
+        )
+        if updated is None:
+            return self._error_response(f"Device '{device_id}' not found", 404)
+
+        return self._json_response({
+            "ok": True,
+            "device_id": device_id,
+            "conversation": updated,
+        })
 
     async def _cmd_show_status(self, request: web.Request) -> web.Response:
         """POST /api/devices/{device_id}/commands/show_status — display.show_status."""
