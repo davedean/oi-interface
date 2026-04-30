@@ -377,7 +377,7 @@ No compiled extensions needed. Pure Python only.
 
 Current:
 ```text
-src/oi-firmware/generic_sbc_handheld/
+src/oi-clients/generic_sbc_handheld/
 ├── README.md
 ├── GENERIC_SBC_HANDHELD_PLAN.md
 ├── capability-profile.json
@@ -386,7 +386,7 @@ src/oi-firmware/generic_sbc_handheld/
 
 Future (when real code exists):
 ```text
-src/oi-firmware/generic_sbc_handheld/
+src/oi-clients/generic_sbc_handheld/
 ├── README.md
 ├── GENERIC_SBC_HANDHELD_PLAN.md
 ├── capability-profile.json

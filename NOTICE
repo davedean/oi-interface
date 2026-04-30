@@ -7,7 +7,7 @@ project's own MIT-licensed code.
 Vendored Python websockets
 --------------------------
 
-Path: src/oi-firmware/generic_sbc_handheld/oi_client/lib/websockets/
+Path: src/oi-clients/generic_sbc_handheld/oi_client/lib/websockets/
 
 The generic SBC handheld runtime vendors the pure-Python `websockets` package
 for read-only handheld environments without pip. `websockets` is licensed under
@@ -24,7 +24,7 @@ Apache-2.0 and Python Software Foundation License notices in the source file.
 ST7789 MicroPython Driver
 -------------------------
 
-Path: src/oi-firmware/m5stack_stickS3/lib/st7789py.py
+Path: src/oi-clients/m5stack_stickS3/lib/st7789py.py
 
 This file includes a MicroPython ST7789 display driver licensed under the MIT
 License.
@@ -35,7 +35,7 @@ Copyright (c) 2019 Ivan Belokobylskiy
 MicroPython WebREPL Client
 --------------------------
 
-Path: src/oi-firmware/tools/webrepl_cli.py
+Path: src/oi-clients/tools/webrepl_cli.py
 
 This script is vendored from MicroPython WebREPL tooling with local extensions
 for command execution during firmware deployment. Verify upstream license

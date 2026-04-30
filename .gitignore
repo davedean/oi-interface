@@ -89,10 +89,10 @@ nanoclaw-integration-plan.md
 openclaw-integration-plan.md
 PLAN.md
 TECH_DEBT.md
-src/oi-firmware/FIRMWARE_READINESS_SUMMARY.md
-src/oi-firmware/START_FIRMWARE_DEVELOPMENT.md
-src/oi-firmware/pico8/OI_PICO8_FIRMWARE_PLAN.md
-src/oi-firmware/pico8/README.md
+src/oi-clients/FIRMWARE_READINESS_SUMMARY.md
+src/oi-clients/START_FIRMWARE_DEVELOPMENT.md
+src/oi-clients/pico8/OI_PICO8_FIRMWARE_PLAN.md
+src/oi-clients/pico8/README.md
 src/oi-gateway/CONTEXT.md
 src/oi-gateway/SESSION_ROUTED_BACKENDS_PLAN.md
 src/oi-sim/OI-SIM-CLI-PLAN.md

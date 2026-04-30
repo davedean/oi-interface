@@ -1,6 +1,6 @@
-# AGENTS.md — src/oi-firmware
+# AGENTS.md — src/oi-clients
 
-Scope: applies to everything under `src/oi-firmware/`.
+Scope: applies to everything under `src/oi-clients/`.
 
 ## Guidance
 

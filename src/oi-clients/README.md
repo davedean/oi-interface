@@ -1,4 +1,4 @@
-# oi-firmware
+# oi-clients
 
 Firmware-related target work for Oi devices.
 

@@ -119,7 +119,7 @@ class HandheldApp:
         # Try multiple possible locations
         possible_paths = [
             "/home/dev/oi-interface",
-            "/home/dev/oi-interface/src/oi-firmware",
+            "/home/dev/oi-interface/src/oi-clients",
             ".",
             os.path.dirname(__file__) + "/../../../..",
         ]
