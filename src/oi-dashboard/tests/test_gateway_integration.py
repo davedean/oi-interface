@@ -7,7 +7,33 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from oi_dashboard import DashboardIntegration
-from oi_dashboard.gateway_integration import DashboardIntegration as IntegrationModuleExport
+from oi_dashboard.gateway_integration import (
+    DashboardEventSink,
+    DashboardIntegration as IntegrationModuleExport,
+)
+
+
+class RecordingSink:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, object]] = []
+
+    def on_device_online(self, device_id: str, payload: dict[str, object]) -> None:
+        self.calls.append(("device_online", device_id, payload))
+
+    def on_device_offline(self, device_id: str) -> None:
+        self.calls.append(("device_offline", device_id, None))
+
+    def on_state_updated(self, device_id: str, state: dict[str, object]) -> None:
+        self.calls.append(("state_updated", device_id, state))
+
+    def on_transcript(self, device_id: str, payload: dict[str, object]) -> None:
+        self.calls.append(("transcript", device_id, payload))
+
+    def on_agent_response(self, device_id: str, payload: dict[str, object]) -> None:
+        self.calls.append(("agent_response", device_id, payload))
+
+    def on_audio_delivered(self, device_id: str, payload: dict[str, object]) -> None:
+        self.calls.append(("audio_delivered", device_id, payload))
 
 
 class MockEventBus:
@@ -30,6 +56,14 @@ class MockEventBus:
 
 def test_package_exports_dashboard_integration() -> None:
     assert DashboardIntegration is IntegrationModuleExport
+
+
+def test_dashboard_event_sink_protocol_accepts_non_dashboard_objects() -> None:
+    sink: DashboardEventSink = RecordingSink()
+
+    sink.on_device_online("device-1", {"device_id": "device-1"})
+
+    assert sink.calls == [("device_online", "device-1", {"device_id": "device-1"})]
 
 
 class TestDashboardIntegration:
