@@ -1,7 +1,8 @@
 """Hermes agent backend over the local/remote HTTP API server."""
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import AsyncIterator, Callable
 from typing import Any, AsyncGenerator
 
 import aiohttp
@@ -32,9 +33,40 @@ class HermesBackend:
     def name(self) -> str:
         return "hermes"
 
-
     async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
         """Send a request and stream response chunks using OpenAI-compatible streaming."""
+        async with self._session_factory() as session:
+            async with session.post(
+                f"{self._base_url}/v1/chat/completions",
+                headers=self._build_headers(request),
+                json=self._build_request_body(request),
+            ) as response:
+                await self._raise_for_http_error(response)
+                if hasattr(response, "content"):
+                    async for chunk in self._stream_sse_chunks(response.content):
+                        yield chunk
+                    return
+
+                payload = await response.json()
+                text = self._extract_response_text(payload)
+                if text:
+                    yield AgentStreamChunk(text_delta=text, is_final=True, metadata={})
+
+    async def send_request(self, request: AgentRequest) -> AgentResponse:
+        response_text = await self._collect_stream_text(request)
+        if not response_text.strip():
+            raise AgentBackendError("Hermes backend returned no assistant text")
+
+        hermes_session_id = self._map_session_key(request)
+        return AgentResponse(
+            response_text=response_text,
+            backend_name=self.name,
+            session_key=hermes_session_id,
+            correlation_id=request.correlation_id,
+            raw_response={},
+        )
+
+    def _build_headers(self, request: AgentRequest) -> dict[str, str]:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -45,103 +77,85 @@ class HermesBackend:
             headers["X-Hermes-Session-Id"] = hermes_session_id
         if request.idempotency_key:
             headers["Idempotency-Key"] = request.idempotency_key
+        return headers
 
-        body = {
+    def _build_request_body(self, request: AgentRequest) -> dict[str, Any]:
+        return {
             "model": self._model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": render_text_prompt(request),
-                }
-            ],
+            "messages": [{"role": "user", "content": render_text_prompt(request)}],
             "stream": True,
         }
 
-        async with self._session_factory() as session:
-            async with session.post(
-                f"{self._base_url}/v1/chat/completions",
-                headers=headers,
-                json=body,
-            ) as response:
-                if response.status >= 400:
-                    raise AgentBackendError(
-                        f"Hermes backend returned HTTP {response.status}: {await response.text()}"
-                    )
-
-                # Check if response supports streaming (has .content iterator)
-                # Fall back to non-streaming for mock/test responses
-                if hasattr(response, "content"):
-                    # Parse SSE (Server-Sent Events) stream
-                    last_text = ""
-                    async for line_bytes in response.content:
-                        line = line_bytes.decode("utf-8").strip()
-                        if not line:
-                            continue
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                payload = __import__("json").loads(data)
-                                choices = payload.get("choices", [])
-                                for choice in choices:
-                                    delta = choice.get("delta", {})
-                                    content = delta.get("content", "")
-                                    if content:
-                                        last_text += content
-                                        yield AgentStreamChunk(
-                                            text_delta=content,
-                                            is_final=False,
-                                            metadata={
-                                                "finish_reason": choice.get("finish_reason"),
-                                            },
-                                        )
-                                    elif choice.get("finish_reason"):
-                                        yield AgentStreamChunk(
-                                            text_delta="",
-                                            is_final=True,
-                                            metadata={
-                                                "finish_reason": choice.get("finish_reason"),
-                                            },
-                                        )
-                            except __import__("json").JSONDecodeError:
-                                continue
-                    if last_text:
-                        yield AgentStreamChunk(
-                            text_delta="",
-                            is_final=True,
-                            metadata={},
-                        )
-                else:
-                    # Non-streaming fallback for mock/test responses
-                    payload = await response.json()
-                    text = self._extract_response_text(payload)
-                    if text:
-                        yield AgentStreamChunk(
-                            text_delta=text,
-                            is_final=True,
-                            metadata={},
-                        )
-
-    async def send_request(self, request: AgentRequest) -> AgentResponse:
-        # Accumulate streaming chunks into final response
-        last_text = ""
-        async for chunk in self.send_request_streaming(request):
-            if chunk.text_delta:
-                last_text += chunk.text_delta
-
-        if not last_text.strip():
-            raise AgentBackendError("Hermes backend returned no assistant text")
-
-        hermes_session_id = self._map_session_key(request)
-        return AgentResponse(
-            response_text=last_text,
-            backend_name=self.name,
-            session_key=hermes_session_id,
-            correlation_id=request.correlation_id,
-            raw_response={},
+    async def _raise_for_http_error(self, response: Any) -> None:
+        if response.status < 400:
+            return
+        raise AgentBackendError(
+            f"Hermes backend returned HTTP {response.status}: {await response.text()}"
         )
 
+    async def _stream_sse_chunks(self, content: AsyncIterator[bytes]) -> AsyncGenerator[AgentStreamChunk, None]:
+        saw_text = False
+        async for payload in self._iter_sse_payloads(content):
+            for chunk in self._chunks_from_sse_payload(payload):
+                if chunk.text_delta:
+                    saw_text = True
+                yield chunk
+        if saw_text:
+            yield AgentStreamChunk(text_delta="", is_final=True, metadata={})
+
+    async def _iter_sse_payloads(self, content: AsyncIterator[bytes]) -> AsyncIterator[dict[str, Any]]:
+        async for line_bytes in content:
+            line = line_bytes.decode("utf-8").strip()
+            if not line or not line.startswith("data: "):
+                continue
+
+            data = line[6:]
+            if data == "[DONE]":
+                break
+
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                yield payload
+
+    def _chunks_from_sse_payload(self, payload: dict[str, Any]) -> list[AgentStreamChunk]:
+        chunks: list[AgentStreamChunk] = []
+        choices = payload.get("choices", [])
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+
+            finish_reason = choice.get("finish_reason")
+            delta = choice.get("delta", {})
+            content = delta.get("content", "") if isinstance(delta, dict) else ""
+            if content:
+                chunks.append(
+                    AgentStreamChunk(
+                        text_delta=content,
+                        is_final=False,
+                        metadata={"finish_reason": finish_reason},
+                    )
+                )
+                continue
+
+            if finish_reason:
+                chunks.append(
+                    AgentStreamChunk(
+                        text_delta="",
+                        is_final=True,
+                        metadata={"finish_reason": finish_reason},
+                    )
+                )
+        return chunks
+
+    async def _collect_stream_text(self, request: AgentRequest) -> str:
+        parts: list[str] = []
+        async for chunk in self.send_request_streaming(request):
+            if chunk.text_delta:
+                parts.append(chunk.text_delta)
+        return "".join(parts)
 
     def _map_session_key(self, request: AgentRequest) -> str | None:
         if not request.session_key:
