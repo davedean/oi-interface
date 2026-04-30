@@ -79,25 +79,15 @@ class Sdl2Input:
         self._event = SDL_Event()
         # Hold tracking: button -> (frame_count, action, started_at)
         self._held_buttons: dict[int, tuple[int, str, float]] = {}
-        self._hold_threshold = 30  # ~500ms at 60fps
+        self._hold_threshold = 8  # ~250-300ms at current app tick (faster UX)
 
     def _check_hold(self, btn_id: int, logical_name: str) -> list[InputEvent]:
-        """Check if a button is being held and emit long_press events."""
+        """Start hold tracking for a newly pressed button."""
         events: list[InputEvent] = []
         now = self._get_frame_time()
-        
+
         if btn_id not in self._held_buttons:
             self._held_buttons[btn_id] = (1, logical_name, now)
-            return events
-        
-        count, name, started = self._held_buttons[btn_id]
-        count += 1
-        self._held_buttons[btn_id] = (count, name, started)
-        
-        # Trigger long_press once when threshold is crossed
-        if count == self._hold_threshold:
-            events.append(InputEvent("button", name, "long_press", btn_id))
-        
         return events
 
     def _get_frame_time(self) -> float:
@@ -212,5 +202,12 @@ class Sdl2Input:
                     events.append(InputEvent("button", name, "pressed", val))
                 else:
                     events.append(InputEvent("hat", f"hat{hat}", "pressed", val))
+
+        # Advance hold counters once per poll frame; emit long_press exactly once.
+        for btn_id, (count, name, started) in list(self._held_buttons.items()):
+            count += 1
+            self._held_buttons[btn_id] = (count, name, started)
+            if count == self._hold_threshold:
+                events.append(InputEvent("button", name, "long_press", btn_id))
 
         return events

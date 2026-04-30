@@ -70,14 +70,19 @@ class HandheldAudio:
             return False
 
         try:
-            subprocess.Popen(
-                ["aplay", str(wav_path)],
+            proc = subprocess.Popen(
+                ["aplay", "-q", str(wav_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            self._playing = True
-            return True
+            self._playing = proc.poll() is None
+            logger.info("aplay started path=%s ok=%s", wav_path, self._playing)
+            return self._playing
         except FileNotFoundError:
+            logger.warning("aplay not found")
+            return False
+        except Exception as exc:
+            logger.exception("aplay launch failed for %s: %s", wav_path, exc)
             return False
 
     def stop(self) -> None:
@@ -172,17 +177,50 @@ class HandheldAudio:
         if getattr(self, "_recording", False):
             return False
 
-        # Use the same default device detection as in detect()
-        desired = SDL_AudioSpec(
-            freq=sample_rate,
-            format=sdl2.AUDIO_S16LSB if format_pcm16 else sdl2.AUDIO_S8,
-            channels=channels,
-            samples=1024,
-        )
-        obtained = SDL_AudioSpec(freq=0, format=0, channels=0, samples=0)
+        # SDL_AudioSpec constructor differs across PySDL2 versions:
+        # some use "format", others use "aformat".
+        audio_fmt = sdl2.AUDIO_S16LSB if format_pcm16 else sdl2.AUDIO_S8
+        try:
+            desired = SDL_AudioSpec(
+                freq=sample_rate,
+                format=audio_fmt,
+                channels=channels,
+                samples=1024,
+            )
+            obtained = SDL_AudioSpec(freq=0, format=0, channels=0, samples=0)
+        except TypeError:
+            desired = SDL_AudioSpec(
+                freq=sample_rate,
+                aformat=audio_fmt,
+                channels=channels,
+                samples=1024,
+            )
+            obtained = SDL_AudioSpec(freq=0, aformat=0, channels=0, samples=0)
+
+        # Try explicit capture-device selection first; some targets choose a
+        # playback-only default and fail capture open.
+        dev_name = None
+        try:
+            num_caps = sdl2.SDL_GetNumAudioDevices(1)
+            chosen = None
+            for i in range(num_caps):
+                nm = sdl2.SDL_GetAudioDeviceName(i, 1)
+                n = nm.decode() if nm else ""
+                low = n.lower()
+                if "usb" in low or "mic" in low or "capture" in low:
+                    chosen = n
+                    break
+            if not chosen and num_caps > 0:
+                nm = sdl2.SDL_GetAudioDeviceName(0, 1)
+                chosen = nm.decode() if nm else None
+            dev_name = chosen.encode() if chosen else None
+            if chosen:
+                logger.info("Opening capture device: %s", chosen)
+        except Exception:
+            dev_name = None
 
         self._recording_dev = SDL_OpenAudioDevice(
-            None,  # default device
+            dev_name,
             1,     # iscapture
             desired,
             obtained,
