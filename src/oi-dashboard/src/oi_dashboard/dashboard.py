@@ -11,6 +11,7 @@ import aiohttp
 from aiohttp import web
 
 from .fallback_html import INLINE_DASHBOARD_HTML
+from .gateway_api import GatewayApi
 from .state import DashboardState, DeviceState, TranscriptEntry
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class Dashboard:
         max_transcripts: int = 100,
     ) -> None:
         self._api_base = api_base_url.rstrip("/")
+        self._gateway_api = GatewayApi(api_base_url)
         self._host = host
         self._port = port
         self._poll_interval = poll_interval
@@ -170,12 +172,14 @@ class Dashboard:
 
     async def _api_devices(self, _request: web.Request) -> web.Response:
         """Proxy to gateway /api/devices."""
-        return await self._proxy_request(f"{self._api_base}/api/devices")
+        return await self._gateway_proxy_response(self._gateway_api.get_devices)
 
     async def _api_device_info(self, request: web.Request) -> web.Response:
         """Proxy to gateway /api/devices/{id}."""
-        device_id = request.match_info["device_id"]
-        return await self._proxy_request(f"{self._api_base}/api/devices/{device_id}")
+        return await self._gateway_proxy_response(
+            self._gateway_api.get_device_info,
+            request.match_info["device_id"],
+        )
 
     async def _api_transcripts(self, _request: web.Request) -> web.Response:
         """Return cached transcript entries."""
@@ -186,17 +190,15 @@ class Dashboard:
 
     async def _api_health(self, _request: web.Request) -> web.Response:
         """Proxy to gateway /api/health."""
-        return await self._proxy_request(f"{self._api_base}/api/health")
+        return await self._gateway_proxy_response(self._gateway_api.get_health)
 
-    async def _proxy_request(self, url: str) -> web.Response:
-        """Proxy an HTTP GET request to the gateway."""
+    async def _gateway_proxy_response(self, request_method, *args: Any) -> web.Response:
+        """Call a gateway adapter method and translate failures into HTTP responses."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    body = await resp.json()
-                    return self._json_response(body, status=resp.status)
+            status, body = await request_method(*args)
+            return self._json_response(body, status=status)
         except aiohttp.ClientError as error:
-            logger.warning("Gateway proxy failed for %s: %s", url, error)
+            logger.warning("Gateway proxy failed: %s", error)
             return self._json_response({"error": str(error)}, status=502)
 
     def _json_response(self, data: Any, status: int = 200) -> web.Response:
@@ -255,29 +257,24 @@ class Dashboard:
     async def _poll_gateway_state(self) -> None:
         """Poll gateway API for current state."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self._api_base}/api/devices",
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    if resp.status != 200:
-                        return
+            status, data = await self._gateway_api.get_devices()
+            if status != 200:
+                return
 
-                    data = await resp.json()
-                    devices = data.get("devices", [])
-                    current_ids: set[str] = set()
-                    for dev_info in devices:
-                        dev_id = dev_info.get("device_id", "")
-                        if not dev_id:
-                            continue
-                        current_ids.add(dev_id)
-                        transition = self._state.apply_polled_device(dev_id, dev_info)
-                        if transition is not None:
-                            event_type, payload = transition
-                            self._broadcast(event_type, payload)
+            devices = data.get("devices", [])
+            current_ids: set[str] = set()
+            for dev_info in devices:
+                dev_id = dev_info.get("device_id", "")
+                if not dev_id:
+                    continue
+                current_ids.add(dev_id)
+                transition = self._state.apply_polled_device(dev_id, dev_info)
+                if transition is not None:
+                    event_type, payload = transition
+                    self._broadcast(event_type, payload)
 
-                    for event_type, payload in self._state.mark_missing_devices_offline(current_ids):
-                        self._broadcast(event_type, payload)
+            for event_type, payload in self._state.mark_missing_devices_offline(current_ids):
+                self._broadcast(event_type, payload)
 
         except aiohttp.ClientError as error:
             logger.debug("Poll failed (gateway may be down): %s", error)
