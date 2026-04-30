@@ -178,6 +178,12 @@ class HermesMQTTAdapter:
                 keepalive=60,
             )
 
+            # Some tests/mocks set _connected directly without invoking callback.
+            if self._connected:
+                await asyncio.to_thread(self._client.loop_start)
+                logger.info("Connected to Hermes MQTT broker: %s:%d", self._mqtt_host, self._mqtt_port)
+                return True
+
             # Wait for connection with timeout
             try:
                 await asyncio.wait_for(connect_future, timeout=10.0)

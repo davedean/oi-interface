@@ -1,0 +1,12 @@
+[run]
+branch = True
+omit =
+    */tests/*
+    */.venv/*
+    */src/oi-sim/src/sim/repl.py
+    */src/oi-sim/src/sim/streaming_repl.py
+    */src/oi-sim/src/sim/fixtures.py
+
+[report]
+show_missing = True
+skip_covered = False

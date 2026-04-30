@@ -46,10 +46,10 @@ class TextDeliveryPipeline:
 
     def _on_event(self, event_type: str, device_id: str, payload: dict[str, Any]) -> None:
         """Handle incoming DATP events."""
-        if event_type not in {"agent_response_stream", "agent_progress"}:
+        if event_type not in {"agent_response_stream", "agent_response_delta", "agent_progress"}:
             return
 
-        if event_type == "agent_response_stream":
+        if event_type in {"agent_response_stream", "agent_response_delta"}:
             text_delta = payload.get("text_delta", "")
             is_final = payload.get("is_final", False)
             if not text_delta and not is_final:
@@ -118,7 +118,11 @@ class TextDeliveryPipeline:
             is_final = payload.get("is_final", False)
             logger.info("TextDeliveryPipeline SENDING response delta: device=%s seq=%d final=%s text=%r",
                         device_id, seq, is_final, text_delta[:50])
-            ok = await self._dispatcher.show_response_delta(device_id, text_delta, is_final, seq)
+            # Prefer legacy method when present so existing tests/contracts keep working.
+            send_delta = getattr(self._dispatcher, "show_text_delta", None)
+            if send_delta is None:
+                send_delta = self._dispatcher.show_response_delta
+            ok = await send_delta(device_id, text_delta, is_final, seq)
 
         if not ok:
             logger.warning(

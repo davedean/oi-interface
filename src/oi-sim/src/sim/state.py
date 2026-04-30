@@ -154,7 +154,7 @@ class StateMachine:
                 return self.transition(State.RESPONSE_CACHED)
             return self._state
 
-        if op == "display.show_response_delta":
+        if op in {"display.show_response_delta", "display.show_text_delta"}:
             # Text streaming delta - stays in current state while streaming.
             # On final delta, transition to RESPONSE_CACHED.
             is_final = args.get("is_final", False)
