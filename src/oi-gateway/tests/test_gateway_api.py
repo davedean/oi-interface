@@ -24,59 +24,45 @@ from registry import DeviceStore, RegistryService
 async def datp_server():
     """Start an ephemeral DATP server."""
     srv = DATPServer(host="localhost", port=0)
-    asyncio.create_task(srv.start())
-    await asyncio.sleep(0.15)
+    await srv.start()
     yield srv
     await srv.stop()
-    await asyncio.sleep(0.1)
 
 
 @pytest.fixture
 async def gateway_api(tmp_path):
     """Start GatewayAPI with a DATP server and RegistryService."""
-    # Create temporary database for registry
     db_path = str(tmp_path / "test-gateway.db")
     store = DeviceStore(db_path)
     event_bus = EventBus()
     registry = RegistryService(store, event_bus)
-
-    # Start registry service
     await registry.start()
 
-    # Create DATP server with registry
     datp_server = DATPServer(
         host="localhost",
         port=0,
         event_bus=event_bus,
         registry=registry,
     )
-    asyncio.create_task(datp_server.start())
-    await asyncio.sleep(0.15)
+    await datp_server.start()
 
-    # Create dispatcher and API
     dispatcher = CommandDispatcher(datp_server)
     api = GatewayAPI(
         datp_server=datp_server,
         command_dispatcher=dispatcher,
         event_bus=event_bus,
         host="localhost",
-        port=0,  # OS-assign free port
+        port=0,
         tts=StubTtsBackend(),
     )
     await api.start()
-    # Give the server time to bind
-    await asyncio.sleep(0.1)
 
     yield api
 
     await api.stop()
     await registry.stop()
-    datp_server._stopping = True
-    if datp_server._server:
-        datp_server._server.close()
-        await datp_server._server.wait_closed()
+    await datp_server.stop()
     store.close()
-    await asyncio.sleep(0.05)
 
 
 class TestHealthEndpoint:
