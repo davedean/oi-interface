@@ -514,9 +514,9 @@ class SkillSandbox:
 
         # Store skill
         self._skills[skill.name] = skill
-        logger.info("Registered skill: %s (ID: %s)", skill.name, skill_id)
+        logger.info("Registered skill: %s (ID: %s)", skill.name, skill.skill_id)
 
-        return skill_id
+        return skill.skill_id
 
     async def execute_skill(
         self,
@@ -583,15 +583,6 @@ class SkillSandbox:
             result.execution_time = execution_time
 
             return result
-
-        except asyncio.TimeoutError:
-            execution_time = asyncio.get_running_loop().time() - start_time
-            logger.error("Skill execution timed out: %s", skill_name)
-            return SkillResult(
-                success=False,
-                error=f"Execution timed out after {self._max_execution_time}s",
-                execution_time=execution_time,
-            )
 
         except Exception as e:
             execution_time = asyncio.get_running_loop().time() - start_time
