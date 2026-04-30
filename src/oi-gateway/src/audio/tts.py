@@ -111,6 +111,7 @@ class PiperTtsBackend:
         self._synth = None
         self._piper_voice = None
 
+        piper_tts_error: Exception | None = None
         try:
             import piper_tts as piper_module
             if model_path:
@@ -119,8 +120,8 @@ class PiperTtsBackend:
                 self._synth = piper_module.PiperSynthesizer.load_local(voice=voice)
             self._mode = "piper_tts"
             return
-        except Exception:
-            pass
+        except (AttributeError, ImportError, ModuleNotFoundError, TypeError) as exc:
+            piper_tts_error = exc
 
         try:
             import piper
@@ -137,7 +138,7 @@ class PiperTtsBackend:
             raise ImportError(
                 "No compatible Piper TTS runtime available. Install piper-tts with a compatible API "
                 "or configure OI_PIPER_MODEL_PATH for piper.PiperVoice."
-            ) from exc
+            ) from piper_tts_error or exc
 
     def synthesize(self, text: str) -> bytes:
         """Synthesize text to WAV using Piper.
