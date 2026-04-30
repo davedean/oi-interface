@@ -60,38 +60,35 @@ class APIClient:
         except Exception:
             logger.error("HTTP error: %s", exc.reason)
 
-    def get(self, path: str) -> dict[str, Any]:
-        """GET request to the API."""
-        url = f"{self.base_url}{path}"
+    @staticmethod
+    def _exit_for_connection_error(exc: urllib.error.URLError) -> None:
+        logger.error("Connection error: %s", exc)
+        sys.exit(1)
+
+    def _request_json(self, request: str | urllib.request.Request, timeout: int) -> dict[str, Any]:
         try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
+            with urllib.request.urlopen(request, timeout=timeout) as resp:
                 return self._read_json_response(resp)
         except urllib.error.HTTPError as exc:
             self._log_http_error(exc)
             sys.exit(1)
         except urllib.error.URLError as exc:
-            logger.error("Connection error: %s", exc)
-            sys.exit(1)
+            self._exit_for_connection_error(exc)
+
+    def get(self, path: str) -> dict[str, Any]:
+        """GET request to the API."""
+        return self._request_json(f"{self.base_url}{path}", timeout=5)
 
     def post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
         """POST JSON request to the API."""
-        url = f"{self.base_url}{path}"
         body = json.dumps(data).encode("utf-8")
-        req = urllib.request.Request(
-            url,
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
             data=body,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return self._read_json_response(resp)
-        except urllib.error.HTTPError as exc:
-            self._log_http_error(exc)
-            sys.exit(1)
-        except urllib.error.URLError as exc:
-            logger.error("Connection error: %s", exc)
-            sys.exit(1)
+        return self._request_json(request, timeout=10)
 
 
 # ------------------------------------------------------------------
