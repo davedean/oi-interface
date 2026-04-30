@@ -208,10 +208,16 @@ class OiSim(OiSimDeviceAPI):
 
         self._ws = await websockets.connect(self.gateway)
         self._connected = True
-        await self._ws.send(json.dumps(self._build_hello_message()))
+        try:
+            await self._ws.send(json.dumps(self._build_hello_message()))
+            raw = await asyncio.wait_for(self._ws.recv(), timeout=5.0)
+            self._session_id = self._parse_hello_ack(raw)
+        except Exception:
+            self._connected = False
+            await self._ws.close()
+            self._ws = None
+            raise
 
-        raw = await asyncio.wait_for(self._ws.recv(), timeout=5.0)
-        self._session_id = self._parse_hello_ack(raw)
         self._listen_task = asyncio.create_task(self._listen_loop())
 
     async def disconnect(self) -> None:

@@ -326,6 +326,9 @@ class TestOiSimUnitCoverage:
             await device.connect()
 
         assert fake_ws.sent[0]["type"] == "hello"
+        assert fake_ws.closed is True
+        assert device.is_connected is False
+        assert device._ws is None
 
     @pytest.mark.asyncio
     async def test_connect_populates_session_and_starts_listener(self, monkeypatch):
