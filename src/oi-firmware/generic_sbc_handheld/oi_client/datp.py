@@ -214,7 +214,12 @@ class DatpClient:
             "ts": _now_iso(),
             "payload": payload,
         }
-        await self._ws.send(json.dumps(msg))
+        try:
+            await self._ws.send(json.dumps(msg))
+        except Exception as exc:
+            print(f"Send failed: {exc}")
+            self._connected = False
+            raise
 
     # ------------------------------------------------------------------
     # Public event API

@@ -357,7 +357,14 @@ class HandheldApp:
             elif item == "Reconnect":
                 self._ui_mode = UIMode.CONNECTING
                 if self.datp:
-                    await self.datp.reconnect()
+                    try:
+                        await self.datp.reconnect()
+                    except Exception as exc:
+                        self._online = False
+                        self._ui_mode = UIMode.ERROR
+                        self._card.title = "Reconnect failed"
+                        self._card.body = str(exc)
+                        return
                     self._online = self.datp.is_connected
                     self._ui_mode = UIMode.READY if self._online else UIMode.ERROR
         elif name == "b":
@@ -377,7 +384,12 @@ class HandheldApp:
         # Optimistic local character update so UI reflects waiting immediately.
         self._character_label = "Waiting"
         self._character_animation = "pulse"
-        await self.datp.send_text_prompt(text)
+        try:
+            await self.datp.send_text_prompt(text)
+        except Exception as exc:
+            self._ui_mode = UIMode.ERROR
+            self._card.title = "Send failed"
+            self._card.body = str(exc)
 
     # ------------------------------------------------------------------
     # Command handling (from gateway)
