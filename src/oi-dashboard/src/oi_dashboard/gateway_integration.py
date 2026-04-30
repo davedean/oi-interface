@@ -46,13 +46,13 @@ class DashboardIntegration:
         self._dashboard = dashboard
         self._event_bus = event_bus
         self._handlers: dict[str, Callable[[str, dict[str, Any]], None]] = {
-            "registry.device_online": self._handle_device_online,
+            "registry.device_online": self._forward("on_device_online"),
             "registry.device_offline": self._handle_device_offline,
             "registry.state_updated": self._handle_registry_state_updated,
-            "state": self._handle_state,
-            "transcript": self._handle_transcript,
-            "agent_response": self._handle_agent_response,
-            "audio_delivered": self._handle_audio_delivered,
+            "state": self._forward("on_state_updated"),
+            "transcript": self._forward("on_transcript"),
+            "agent_response": self._forward("on_agent_response"),
+            "audio_delivered": self._forward("on_audio_delivered"),
         }
 
     def start(self) -> None:
@@ -74,9 +74,13 @@ class DashboardIntegration:
         if handler is not None:
             handler(device_id, payload)
 
-    def _handle_device_online(self, device_id: str, payload: dict[str, Any]) -> None:
-        """Forward a device online event."""
-        self._dashboard.on_device_online(device_id, payload)
+    def _forward(self, handler_name: str) -> Callable[[str, dict[str, Any]], None]:
+        """Build an event handler that forwards payloads to a dashboard method."""
+
+        def handler(device_id: str, payload: dict[str, Any]) -> None:
+            getattr(self._dashboard, handler_name)(device_id, payload)
+
+        return handler
 
     def _handle_device_offline(self, device_id: str, payload: dict[str, Any]) -> None:
         """Forward a device offline event while ignoring its payload."""
@@ -86,19 +90,3 @@ class DashboardIntegration:
     def _handle_registry_state_updated(self, device_id: str, payload: dict[str, Any]) -> None:
         """Forward registry state payloads using the inner state object."""
         self._dashboard.on_state_updated(device_id, payload.get("state", {}))
-
-    def _handle_state(self, device_id: str, payload: dict[str, Any]) -> None:
-        """Forward a raw device state payload."""
-        self._dashboard.on_state_updated(device_id, payload)
-
-    def _handle_transcript(self, device_id: str, payload: dict[str, Any]) -> None:
-        """Forward a transcript event."""
-        self._dashboard.on_transcript(device_id, payload)
-
-    def _handle_agent_response(self, device_id: str, payload: dict[str, Any]) -> None:
-        """Forward an agent response event."""
-        self._dashboard.on_agent_response(device_id, payload)
-
-    def _handle_audio_delivered(self, device_id: str, payload: dict[str, Any]) -> None:
-        """Forward an audio delivery event."""
-        self._dashboard.on_audio_delivered(device_id, payload)
