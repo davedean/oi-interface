@@ -171,23 +171,25 @@ class LoadBalancer:
             if load is None or load.total_load < self._config.max_load_threshold:
                 return preferred_device
 
-        if self._config.strategy == LoadBalanceStrategy.ROUND_ROBIN:
-            return self._round_robin_select(device_ids)
+        selector = self._selectors(affinities).get(
+            self._config.strategy,
+            self._least_loaded_selector,
+        )
+        return selector(device_ids)
 
-        elif self._config.strategy == LoadBalanceStrategy.LEAST_LOADED:
-            return self._least_loaded_select(device_ids)
+    def _selectors(
+        self,
+        affinities: dict[str, list[DeviceAffinity]] | None,
+    ) -> dict[Any, Callable[[list[str]], str | None]]:
+        return {
+            LoadBalanceStrategy.ROUND_ROBIN: self._round_robin_select,
+            LoadBalanceStrategy.LEAST_LOADED: self._least_loaded_select,
+            LoadBalanceStrategy.WEIGHTED: self._weighted_select,
+            LoadBalanceStrategy.AFFINITY: lambda device_ids: self._affinity_select(device_ids, affinities),
+            LoadBalanceStrategy.RANDOM: self._random_select,
+        }
 
-        elif self._config.strategy == LoadBalanceStrategy.WEIGHTED:
-            return self._weighted_select(device_ids)
-
-        elif self._config.strategy == LoadBalanceStrategy.AFFINITY:
-            return self._affinity_select(device_ids, affinities)
-
-        elif self._config.strategy == LoadBalanceStrategy.RANDOM:
-            import random
-            return random.choice(device_ids)
-
-        # Default: least loaded
+    def _least_loaded_selector(self, device_ids: list[str]) -> str | None:
         return self._least_loaded_select(device_ids)
 
     def _round_robin_select(self, device_ids: list[str]) -> str | None:
@@ -216,6 +218,11 @@ class LoadBalancer:
         if not candidates:
             return None
         return candidates[0][0]
+
+    def _random_select(self, device_ids: list[str]) -> str | None:
+        import random
+
+        return random.choice(device_ids)
 
     def _weighted_select(self, device_ids: list[str]) -> str | None:
         """Weighted selection based on available capacity."""
