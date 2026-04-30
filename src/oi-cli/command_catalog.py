@@ -31,33 +31,41 @@ def add_api_url_argument(
     parser.add_argument("--api-url", default=default, help=help_text)
 
 
-def _configure_no_args(parser: argparse.ArgumentParser) -> None:
+def _add_command_api_url_argument(parser: argparse.ArgumentParser) -> None:
     add_api_url_argument(parser, "Override API base URL", default=argparse.SUPPRESS)
+
+
+def _add_device_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--device", required=True, help="Target device ID")
+
+
+def _configure_no_args(parser: argparse.ArgumentParser) -> None:
+    _add_command_api_url_argument(parser)
 
 
 def _configure_show_status(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--device", required=True, help="Target device ID")
+    _add_device_argument(parser)
     parser.add_argument("--state", required=True, help="Status state (e.g., thinking, idle)")
     parser.add_argument("--label", help="Optional label text")
-    add_api_url_argument(parser, "Override API base URL", default=argparse.SUPPRESS)
+    _add_command_api_url_argument(parser)
 
 
 def _configure_mute(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--device", required=True, help="Target device ID")
+    _add_device_argument(parser)
     parser.add_argument("--minutes", required=True, type=int, help="Number of minutes to mute")
-    add_api_url_argument(parser, "Override API base URL", default=argparse.SUPPRESS)
+    _add_command_api_url_argument(parser)
 
 
 def _configure_route(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--device", required=True, help="Target device ID")
+    _add_device_argument(parser)
     parser.add_argument("--text", required=True, help="Text to synthesize and route")
-    add_api_url_argument(parser, "Override API base URL", default=argparse.SUPPRESS)
+    _add_command_api_url_argument(parser)
 
 
 def _configure_audio_play(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--device", required=True, help="Target device ID")
+    _add_device_argument(parser)
     parser.add_argument("--response-id", help="Response ID to play (default: latest)")
-    add_api_url_argument(parser, "Override API base URL", default=argparse.SUPPRESS)
+    _add_command_api_url_argument(parser)
 
 
 def _devices(parsed: argparse.Namespace, gateway: GatewayAPI) -> CommandResult:
