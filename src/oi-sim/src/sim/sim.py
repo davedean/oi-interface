@@ -287,47 +287,42 @@ class OiSim:
         payload = msg.get("payload", {})
 
         if msg_type == "command":
-            op = payload.get("op", "")
-            args = payload.get("args", {})
-            try:
-                self._state_machine.receive_command(op, args)
-            except InvalidTransition as exc:
-                if self.strict:
-                    raise
-                logger.debug(
-                    "Ignoring invalid transition for command %r: %s",
-                    op,
-                    exc,
-                )
-            self._received_commands.append(payload)
-            if self._ws is not None:
-                ack = {
-                    "v": "datp",
-                    "type": "ack",
-                    "id": _new_id("ack"),
-                    "device_id": self.device_id,
-                    "ts": _now_iso(),
-                    "payload": {
-                        "command_id": msg.get("id", ""),
-                        "ok": True,
-                    },
-                }
-                await self._ws.send(json.dumps(ack))
-                self._record_trace("send", "ack", ack)
-
+            await self._handle_command_message(msg, payload)
         elif msg_type == "error":
-            code = payload.get("code", "")
-            logger.warning("Gateway error: %s — %s", code, payload.get("message", ""))
-            try:
-                self._state_machine.transition(State.ERROR)
-            except InvalidTransition:
-                pass
-
+            self._handle_error_message(payload)
         elif msg_type == "ack":
-            cmd_id = payload.get("command_id", "")
-            future = self._pending_acks.pop(cmd_id, None)
-            if future and not future.done():
-                future.set_result(payload.get("ok", True))
+            self._resolve_pending_ack(payload)
+
+    async def _handle_command_message(self, msg: dict[str, Any], payload: dict[str, Any]) -> None:
+        """Apply an incoming command and acknowledge it when connected."""
+        op = payload.get("op", "")
+        args = payload.get("args", {})
+        try:
+            self._state_machine.receive_command(op, args)
+        except InvalidTransition as exc:
+            if self.strict:
+                raise
+            logger.debug("Ignoring invalid transition for command %r: %s", op, exc)
+
+        self._received_commands.append(payload)
+        if self._ws is not None:
+            await self._send_ack(msg.get("id", ""))
+
+    def _handle_error_message(self, payload: dict[str, Any]) -> None:
+        """Record a gateway error by attempting to move into ERROR state."""
+        code = payload.get("code", "")
+        logger.warning("Gateway error: %s — %s", code, payload.get("message", ""))
+        try:
+            self._state_machine.transition(State.ERROR)
+        except InvalidTransition:
+            pass
+
+    def _resolve_pending_ack(self, payload: dict[str, Any]) -> None:
+        """Resolve any local future waiting on a gateway acknowledgement."""
+        cmd_id = payload.get("command_id", "")
+        future = self._pending_acks.pop(cmd_id, None)
+        if future and not future.done():
+            future.set_result(payload.get("ok", True))
 
     async def _listen_loop(self) -> None:
         """Background task: receive messages, record commands, send acks."""
@@ -364,6 +359,14 @@ class OiSim:
         }
         await self._ws.send(json.dumps(msg))
         self._record_trace("send", msg_type, msg)
+
+    async def _send_event(self, event: str, **payload: Any) -> None:
+        """Send a DATP event message."""
+        await self._send("event", {"event": event, **payload})
+
+    async def _send_ack(self, command_id: str, ok: bool = True) -> None:
+        """Acknowledge a command received from the gateway."""
+        await self._send("ack", {"command_id": command_id, "ok": ok})
 
     # ------------------------------------------------------------------
     # Button / event API
@@ -430,10 +433,7 @@ class OiSim:
         # we're already waiting on a response.
         if self._state_machine.state != State.THINKING:
             self._state_machine.transition(State.THINKING)
-        await self._send("event", {
-            "event": "text.prompt",
-            "text": text,
-        })
+        await self._send_event("text.prompt", text=text)
 
     # ------------------------------------------------------------------
     # Playback events
@@ -447,10 +447,7 @@ class OiSim:
         response_id : str, optional
             The response ID being played. Defaults to "latest".
         """
-        await self._send("event", {
-            "event": "audio.playback_started",
-            "response_id": response_id or "latest",
-        })
+        await self._send_event("audio.playback_started", response_id=response_id or "latest")
 
     async def send_playback_finished(self, response_id: str | None = None) -> None:
         """Send audio.playback_finished event → transitions PLAYING → RESPONSE_CACHED.
@@ -463,10 +460,7 @@ class OiSim:
         # Only transition if currently PLAYING
         if self._state_machine.state == State.PLAYING:
             self._state_machine.transition(State.RESPONSE_CACHED)
-        await self._send("event", {
-            "event": "audio.playback_finished",
-            "response_id": response_id or "latest",
-        })
+        await self._send_event("audio.playback_finished", response_id=response_id or "latest")
 
     # ------------------------------------------------------------------
     # Battery and power events
@@ -474,24 +468,15 @@ class OiSim:
 
     async def send_battery_low(self) -> None:
         """Send battery_low event when battery is below threshold."""
-        await self._send("event", {
-            "event": "battery_low",
-            "battery_percent": 10,
-        })
+        await self._send_event("battery_low", battery_percent=10)
 
     async def send_charging_started(self) -> None:
         """Send charging_started event when charging begins."""
-        await self._send("event", {
-            "event": "charging_started",
-            "battery_percent": 15,
-        })
+        await self._send_event("charging_started", battery_percent=15)
 
     async def send_charging_stopped(self) -> None:
         """Send charging_stopped event when charging ends."""
-        await self._send("event", {
-            "event": "charging_stopped",
-            "battery_percent": 100,
-        })
+        await self._send_event("charging_stopped", battery_percent=100)
 
     # ------------------------------------------------------------------
     # WiFi events
@@ -499,17 +484,11 @@ class OiSim:
 
     async def send_wifi_connected(self, ssid: str = "MyNetwork") -> None:
         """Send wifi.connected event when WiFi connects."""
-        await self._send("event", {
-            "event": "wifi.connected",
-            "ssid": ssid,
-            "rssi": -50,
-        })
+        await self._send_event("wifi.connected", ssid=ssid, rssi=-50)
 
     async def send_wifi_disconnected(self) -> None:
         """Send wifi.disconnected event when WiFi disconnects."""
-        await self._send("event", {
-            "event": "wifi.disconnected",
-        })
+        await self._send_event("wifi.disconnected")
 
     # ------------------------------------------------------------------
     # Error events
@@ -525,11 +504,7 @@ class OiSim:
         message : str
             Human-readable error message.
         """
-        await self._send("event", {
-            "event": "device.error",
-            "code": code,
-            "message": message,
-        })
+        await self._send_event("device.error", code=code, message=message)
 
     # ------------------------------------------------------------------
     # Sensor events
@@ -545,11 +520,7 @@ class OiSim:
         charging : bool
             Whether the device is charging.
         """
-        await self._send("event", {
-            "event": "sensor.battery_update",
-            "battery_percent": percent,
-            "charging": charging,
-        })
+        await self._send_event("sensor.battery_update", battery_percent=percent, charging=charging)
 
     async def send_wifi_update(self, rssi: int, ssid: str | None = None) -> None:
         """Send periodic WiFi status update.
@@ -561,10 +532,10 @@ class OiSim:
         ssid : str, optional
             The connected SSID.
         """
-        payload: dict[str, Any] = {"event": "sensor.wifi_update", "rssi": rssi}
+        payload: dict[str, Any] = {"rssi": rssi}
         if ssid:
             payload["ssid"] = ssid
-        await self._send("event", payload)
+        await self._send_event("sensor.wifi_update", **payload)
 
     # ------------------------------------------------------------------
     # Storage events
@@ -578,16 +549,11 @@ class OiSim:
         bytes_free : int
             Number of free bytes remaining.
         """
-        await self._send("event", {
-            "event": "storage.low",
-            "bytes_free": bytes_free,
-        })
+        await self._send_event("storage.low", bytes_free=bytes_free)
 
     async def send_storage_full(self) -> None:
         """Send storage_full event when storage is completely full."""
-        await self._send("event", {
-            "event": "storage.full",
-        })
+        await self._send_event("storage.full")
 
     async def send_storage_available(self, bytes_free: int) -> None:
         """Send storage_available event after cleanup or format.
@@ -597,10 +563,7 @@ class OiSim:
         bytes_free : int
             Number of free bytes now available.
         """
-        await self._send("event", {
-            "event": "storage.available",
-            "bytes_free": bytes_free,
-        })
+        await self._send_event("storage.available", bytes_free=bytes_free)
 
     # ------------------------------------------------------------------
     # Network events
@@ -608,15 +571,11 @@ class OiSim:
 
     async def send_network_online(self) -> None:
         """Send network.online event when network becomes available."""
-        await self._send("event", {
-            "event": "network.online",
-        })
+        await self._send_event("network.online")
 
     async def send_network_offline(self) -> None:
         """Send network.offline event when network becomes unavailable."""
-        await self._send("event", {
-            "event": "network.offline",
-        })
+        await self._send_event("network.offline")
 
     # ------------------------------------------------------------------
     # Display events
@@ -632,17 +591,11 @@ class OiSim:
         y : int
             Y coordinate of touch.
         """
-        await self._send("event", {
-            "event": "display.touched",
-            "x": x,
-            "y": y,
-        })
+        await self._send_event("display.touched", x=x, y=y)
 
     async def send_display_released(self) -> None:
         """Send display.released event when screen touch is released."""
-        await self._send("event", {
-            "event": "display.released",
-        })
+        await self._send_event("display.released")
 
     # ------------------------------------------------------------------
     # Button timeout event
@@ -656,10 +609,7 @@ class OiSim:
         button : str
             The button that timed out. Default: "main".
         """
-        await self._send("event", {
-            "event": "button.timeout",
-            "button": button,
-        })
+        await self._send_event("button.timeout", button=button)
 
     # ------------------------------------------------------------------
     # Capability update events
@@ -679,12 +629,12 @@ class OiSim:
         removed : list[str], optional
             List of removed capabilities.
         """
-        payload: dict[str, Any] = {"event": "device.capability_updated"}
+        payload: dict[str, Any] = {}
         if added:
             payload["added"] = added
         if removed:
             payload["removed"] = removed
-        await self._send("event", payload)
+        await self._send_event("device.capability_updated", **payload)
 
     # ------------------------------------------------------------------
     # Audio upload
