@@ -97,19 +97,27 @@ class SubprocessPiBackend(AgentBackend):
                     continue
 
                 event_type = event.get("type")
-                extracted = self._extract_text(event)
+                extracted, is_incremental = self._extract_text(event)
                 emitted = False
                 if extracted and extracted.strip():
-                    # Only yield the DELTA (new text), not the full text
-                    if extracted.startswith(sent_text):
-                        delta = extracted[len(sent_text):]
+                    if is_incremental:
+                        # Some providers send true token deltas, others send growing snapshots.
+                        if extracted.startswith(sent_text):
+                            delta = extracted[len(sent_text):]
+                            sent_text = extracted
+                        else:
+                            delta = extracted
+                            sent_text = sent_text + delta
+                        response_text = sent_text
                     else:
-                        # Text doesn't match up, send full new text
-                        delta = extracted
-
-                    if delta:
+                        if extracted.startswith(sent_text):
+                            delta = extracted[len(sent_text):]
+                        else:
+                            delta = extracted
                         sent_text = extracted
                         response_text = extracted
+
+                    if delta:
                         is_final = event_type in terminal_event_types
                         emitted = True
                         yield AgentStreamChunk(
@@ -119,7 +127,7 @@ class SubprocessPiBackend(AgentBackend):
                         )
 
                 if event_type in terminal_event_types:
-                    event_text = self._extract_text(event)
+                    event_text, _ = self._extract_text(event)
                     if event_text and event_text.strip() and not responded:
                         responded = True
                         response_text = event_text
@@ -146,7 +154,14 @@ class SubprocessPiBackend(AgentBackend):
                     continue
 
                 if not emitted:
-                    if event_type == "message_update":
+                    progress_text = self._extract_progress_text(event)
+                    if progress_text:
+                        yield AgentStreamChunk(
+                            text_delta="",
+                            is_final=False,
+                            metadata={"event_type": event_type, "progress_text": progress_text},
+                        )
+                    elif event_type == "message_update":
                         logger.debug(
                             "No streamable text extracted from message_update assistantMessageEvent=%r",
                             event.get("assistantMessageEvent"),
@@ -181,7 +196,10 @@ class SubprocessPiBackend(AgentBackend):
         got_any = False
         async for chunk in self._read_events_from_prompt(message):
             if chunk.text_delta:
-                response_text += chunk.text_delta
+                if chunk.is_final:
+                    response_text = chunk.text_delta
+                else:
+                    response_text += chunk.text_delta
                 got_any = True
             if chunk.is_final and not chunk.text_delta:
                 got_any = True
@@ -195,7 +213,8 @@ class SubprocessPiBackend(AgentBackend):
         async for chunk in self._read_events_from_prompt(message):
             yield chunk
 
-    def _extract_text(self, event: dict[str, Any]) -> str | None:
+    def _extract_text(self, event: dict[str, Any]) -> tuple[str | None, bool]:
+        """Extract text plus whether it's incremental (delta) or snapshot/final."""
         event_type = event.get("type")
 
         if event_type == "agent_end":
@@ -204,14 +223,14 @@ class SubprocessPiBackend(AgentBackend):
                 for msg in reversed(messages):
                     text = self._extract_message_text(msg)
                     if text:
-                        return text
-            return None
+                        return text, False
+            return None, False
 
         if event_type == "message_end":
             text = self._extract_message_text(event.get("message"))
             if text:
-                return text
-            return None
+                return text, False
+            return None, False
 
         assistant_event = event.get("assistantMessageEvent")
         if isinstance(assistant_event, dict):
@@ -220,24 +239,59 @@ class SubprocessPiBackend(AgentBackend):
                 for key in ("content", "delta", "text"):
                     val = assistant_event.get(key)
                     if isinstance(val, str) and val.strip():
-                        return val
+                        return val, (assistant_event_type == "text_delta")
 
                 content_value = assistant_event.get("content")
                 if isinstance(content_value, dict):
                     text = self._extract_message_text(content_value)
                     if text:
-                        return text
+                        return text, False
 
                 partial = assistant_event.get("partial")
                 text = self._extract_message_text(partial)
                 if text:
-                    return text
-            return None
+                    return text, False
+            return None, False
 
         for key in ("text", "response", "content"):
             val = event.get(key)
             if isinstance(val, str) and val.strip():
-                return val
+                return val, False
+        return None, False
+
+    def _extract_progress_text(self, event: dict[str, Any]) -> str | None:
+        """Best-effort human-readable progress text from non-terminal events."""
+        event_type = event.get("type")
+        if event_type in {"agent_start", "turn_start"}:
+            return "[thinking] starting"
+        if event_type == "turn_end":
+            return "[thinking] wrapping up"
+
+        if event_type == "extension_ui_request":
+            method = event.get("method")
+            message = event.get("message")
+            # Suppress noisy UI plumbing/status spam
+            if isinstance(method, str) and method in {"setWidget", "setStatus"}:
+                if isinstance(message, str) and "Model Tagger" in message:
+                    return f"[extension] {message.strip()}"
+                return None
+            if isinstance(message, str) and message.strip():
+                return f"[extension] {message.strip()}"
+            if isinstance(method, str) and method.strip():
+                return f"[extension] {method.strip()}"
+            return "[extension] update"
+
+        if event_type == "message_update":
+            assistant_event = event.get("assistantMessageEvent")
+            if isinstance(assistant_event, dict):
+                assistant_type = assistant_event.get("type")
+                if assistant_type and assistant_type.startswith("toolcall"):
+                    name = assistant_event.get("name") or assistant_event.get("toolName")
+                    if isinstance(name, str) and name.strip():
+                        return f"[tool] {name.strip()}"
+                    if assistant_type in {"toolcall_start", "toolcall"}:
+                        return "[tool] working"
+                    return None
         return None
 
     def _extract_message_text(self, message: Any) -> str | None:
