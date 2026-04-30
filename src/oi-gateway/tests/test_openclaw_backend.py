@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import sys
 
@@ -53,6 +54,16 @@ class FakeSession:
         return self.ws
 
 
+class SlowWebSocket(FakeWebSocket):
+    def __init__(self, delay_seconds: float) -> None:
+        super().__init__([])
+        self._delay_seconds = delay_seconds
+
+    async def receive_json(self):
+        await asyncio.sleep(self._delay_seconds)
+        return await super().receive_json()
+
+
 def make_request() -> AgentRequest:
     return AgentRequest(
         user_text="mute for 30 minutes.",
@@ -73,11 +84,17 @@ def make_request() -> AgentRequest:
     )
 
 
-def make_backend(ws: FakeWebSocket, *, token: str = "secret-token") -> tuple[OpenClawBackend, FakeSession]:
+def make_backend(
+    ws: FakeWebSocket,
+    *,
+    token: str = "secret-token",
+    timeout_seconds: float = 120.0,
+) -> tuple[OpenClawBackend, FakeSession]:
     session = FakeSession(ws)
     backend = OpenClawBackend(
         url="ws://127.0.0.1:18789",
         token=token,
+        timeout_seconds=timeout_seconds,
         session_factory=lambda: session,
     )
     backend._load_or_create_device_identity = lambda: {
@@ -200,6 +217,14 @@ async def test_openclaw_backend_raises_when_no_connect_challenge_arrives():
 
 
 @pytest.mark.asyncio
+async def test_openclaw_backend_raises_on_gateway_timeout():
+    backend, _session = make_backend(SlowWebSocket(delay_seconds=0.01), timeout_seconds=0.001)
+
+    with pytest.raises(AgentBackendError, match="timed out waiting for gateway response"):
+        await backend.send_request(make_request())
+
+
+@pytest.mark.asyncio
 async def test_openclaw_backend_raises_when_no_text_payload_present():
     ws = FakeWebSocket(
         [
@@ -250,6 +275,7 @@ def test_openclaw_backend_helper_methods_cover_text_and_metadata_paths():
     assert backend._extract_text_from_openclaw_payload({"delta": "d"}) == "d"
     assert backend._extract_text_from_openclaw_payload({"data": "e"}) == "e"
     assert backend._extract_text_from_openclaw_payload([]) == ""
+    assert backend._build_event_chunk({"type": "event", "event": "agent.delta", "payload": {"text": "Hello"}}, "Hello") is None
 
     payload = {
         "result": {
@@ -274,6 +300,38 @@ def test_openclaw_backend_helper_methods_cover_text_and_metadata_paths():
         platform=" Linux ",
         device_family=" Desktop ",
     ) == "v3|dev1|gateway-client|backend|operator|read,write|1|tok|nonce|linux|desktop"
+
+
+@pytest.mark.asyncio
+async def test_openclaw_backend_streams_snapshot_style_events_without_duplication():
+    ws = FakeWebSocket(
+        [
+            {"type": "event", "event": "connect.challenge", "payload": {"nonce": "nonce-1"}},
+            {"type": "res", "id": "connect-1", "ok": True, "payload": {"auth": {}}},
+            {"type": "event", "event": "agent.delta", "payload": {"text": "Hello"}},
+            {"type": "event", "event": "agent.delta", "payload": {"text": "Hello world"}},
+            {"type": "res", "id": "agent-2", "ok": True, "payload": {"status": "accepted"}},
+            {
+                "type": "res",
+                "id": "agent-2",
+                "ok": True,
+                "payload": {
+                    "status": "ok",
+                    "result": {
+                        "payloads": [{"text": "Hello world!"}],
+                        "meta": {"final": True},
+                    },
+                },
+            },
+        ]
+    )
+    backend, _ = make_backend(ws)
+
+    chunks = [chunk async for chunk in backend.send_request_streaming(make_request())]
+
+    assert [chunk.text_delta for chunk in chunks] == ["Hello", " world", "!"]
+    assert [chunk.is_final for chunk in chunks] == [False, False, True]
+    assert chunks[-1].metadata == {"final": True}
 
 
 @pytest.mark.asyncio

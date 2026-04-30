@@ -1,6 +1,7 @@
 """OpenClaw agent backend via direct Gateway WebSocket RPC."""
 from __future__ import annotations
 
+import asyncio
 import json
 import itertools
 import logging
@@ -43,7 +44,6 @@ class OpenClawBackend(AgentBackend):
     def name(self) -> str:
         return "openclaw"
 
-
     async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
         """Send a request and stream response chunks from OpenClaw."""
         async with self._session_factory() as session:
@@ -56,8 +56,8 @@ class OpenClawBackend(AgentBackend):
 
                 streamed_text = ""
                 while True:
-                    frame = await ws.receive_json()
-                    event_chunk = self._build_event_chunk(frame)
+                    frame = await self._receive_json(ws)
+                    event_chunk = self._build_event_chunk(frame, streamed_text)
                     if event_chunk is not None:
                         streamed_text += event_chunk.text_delta
                         yield event_chunk
@@ -428,7 +428,7 @@ process.stdout.write(Buffer.from(sig).toString("base64").replace(/\+/g, "-").rep
         return f"agent:main:oi:device:{suffix}"
 
     async def _perform_connect_handshake(self, ws: Any) -> None:
-        challenge = await ws.receive_json()
+        challenge = await self._receive_json(ws)
         nonce = self._extract_connect_nonce(challenge)
 
         connect_id = self._next_id("connect")
@@ -436,9 +436,17 @@ process.stdout.write(Buffer.from(sig).toString("base64").replace(/\+/g, "-").rep
         self._log_connect_request(connect_request)
         await ws.send_json(connect_request)
 
-        hello = await ws.receive_json()
+        hello = await self._receive_json(ws)
         self._assert_ok_response(hello, connect_id, "OpenClaw connect")
         self._log_hello_ok(hello)
+
+    async def _receive_json(self, ws: Any) -> dict[str, Any]:
+        try:
+            return await asyncio.wait_for(ws.receive_json(), timeout=self._timeout_seconds)
+        except TimeoutError as exc:
+            raise AgentBackendError(
+                f"OpenClaw backend timed out waiting for gateway response after {self._timeout_seconds:.1f}s"
+            ) from exc
 
     def _extract_connect_nonce(self, challenge: dict[str, Any]) -> str:
         if challenge.get("type") != "event" or challenge.get("event") != "connect.challenge":
@@ -449,7 +457,7 @@ process.stdout.write(Buffer.from(sig).toString("base64").replace(/\+/g, "-").rep
             raise AgentBackendError("OpenClaw gateway connect.challenge missing nonce")
         return nonce
 
-    def _build_event_chunk(self, frame: dict[str, Any]) -> AgentStreamChunk | None:
+    def _build_event_chunk(self, frame: dict[str, Any], streamed_text: str = "") -> AgentStreamChunk | None:
         if frame.get("type") != "event":
             return None
         event_name = frame.get("event")
@@ -457,8 +465,11 @@ process.stdout.write(Buffer.from(sig).toString("base64").replace(/\+/g, "-").rep
         text = self._extract_text_from_openclaw_payload(payload)
         if not text:
             return None
-        logger.debug("OpenClaw streaming text: %s", text[:50])
-        return AgentStreamChunk(text_delta=text, is_final=False, metadata={"event": event_name})
+        delta = self._remaining_response_text(streamed_text, text)
+        if not delta:
+            return None
+        logger.debug("OpenClaw streaming text: %s", delta[:50])
+        return AgentStreamChunk(text_delta=delta, is_final=False, metadata={"event": event_name})
 
     def _handle_response_frame(
         self,
