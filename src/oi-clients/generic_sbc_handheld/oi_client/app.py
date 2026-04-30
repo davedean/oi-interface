@@ -19,6 +19,7 @@ from typing import Callable
 
 from oi_client.state import State
 from oi_client.input import Sdl2Input, InputEvent
+from oi_client.button_mapping import run_button_mapping_wizard
 from oi_client.renderer import Sdl2Renderer
 from oi_client.audio import HandheldAudio
 from oi_client.capabilities import build_capabilities
@@ -183,12 +184,14 @@ class HandheldApp:
         agent_id: str | None = None,
         session_key: str | None = None,
         settings_persist: Callable[[dict[str, object]], None] | None = None,
+        button_map: dict[str, dict[str, object]] | None = None,
+        button_profile_name: str | None = None,
     ) -> None:
         self.gateway_url = gateway_url
         self.device_id = device_id
         self.device_type = device_type
 
-        self.input = Sdl2Input()
+        self.input = Sdl2Input(button_map=button_map)
         self.renderer = Sdl2Renderer()
         self.audio = HandheldAudio()
         self.datp: DatpClient | None = None
@@ -234,6 +237,7 @@ class HandheldApp:
             "Mute",
             "Show Progress",
             "Show Celebrations",
+            "Map Buttons",
             "Connection",
             "Diagnostics",
             "System",
@@ -263,6 +267,7 @@ class HandheldApp:
             size_value = "small"
         self._character_size = size_value if size_value in {"big", "small"} else "big"
         self._settings_persist = settings_persist
+        self._button_profile_name = button_profile_name or ""
         self._preferred_backend_id = backend_id
         self._preferred_agent_id = agent_id
         self._preferred_session_key = session_key or f"oi:device:{device_id}"
@@ -358,6 +363,11 @@ class HandheldApp:
             print("Renderer init failed")
             self.input.shutdown()
             return
+
+        if (not self.input.has_custom_mapping()) or (
+            self._button_profile_name and self._button_profile_name != self.input.controller_name()
+        ):
+            await self._run_button_mapping(force=False)
 
         audio_status = self.audio.detect()
         capabilities = self._build_capabilities(audio_status)
@@ -754,6 +764,9 @@ class HandheldApp:
             f"backend: {self._current_backend_label()}",
             f"agent: {self._current_agent_label()}",
             f"session: {self._current_session_label()}",
+            f"controller: {self.input.controller_name()}",
+            f"button map: {'custom' if self.input.has_custom_mapping() else 'default'}",
+            f"profile: {self._button_profile_name or 'unset'}",
             f"brightness: {self._brightness_label()} ({self._device_control.brightness})",
             f"volume: {self._device_control.volume}%",
             f"led: {'on' if self._device_control.led_enabled else 'off'}",
@@ -771,6 +784,18 @@ class HandheldApp:
             lines.append(f"free mem: {telemetry['heap_free']}")
         lines.append(f"uptime: {telemetry.get('uptime_s', 0)}s")
         self._show_card_message("Diagnostics", "\n".join(lines))
+
+    async def _run_button_mapping(self, *, force: bool) -> None:
+        seed_map = self.input.export_button_map()
+        mapped = await run_button_mapping_wizard(self.renderer, self.input, seed_map=seed_map)
+        if mapped:
+            self.input.set_button_map(mapped, custom=True)
+            self._button_profile_name = self.input.controller_name()
+            self._persist_settings()
+            status = "updated" if force else "saved"
+            self._show_card_message("Button Setup", f"Button profile {status} for {self._button_profile_name}")
+        elif force:
+            self._show_card_message("Button Setup", "Mapping cancelled; keeping current button profile")
 
     async def _handle_menu(self, name: str) -> None:
         menu_items = self._menu_items()
@@ -820,6 +845,8 @@ class HandheldApp:
                     self._celebration_note = ""
                 self._persist_settings()
                 self._show_card_message("Show Celebrations", f"Set to {'on' if self._show_celebrations else 'off'}")
+            elif item == "Map Buttons":
+                await self._run_button_mapping(force=True)
             elif item == "Connection":
                 self._menu_mode = "connection"
                 self._menu_idx = 0
@@ -912,6 +939,8 @@ class HandheldApp:
                 "backend_id": self._preferred_backend_id,
                 "agent_id": self._preferred_agent_id,
                 "session_key": self._preferred_session_key,
+                "button_map": self.input.export_button_map(),
+                "button_profile_name": self._button_profile_name,
             })
         except Exception as exc:
             logger.warning("settings persistence failed: %s", exc)

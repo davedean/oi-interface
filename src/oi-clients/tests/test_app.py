@@ -19,6 +19,9 @@ from oi_client.app import CardData, HandheldApp, UIMode
 
 
 class StubInput:
+    def __init__(self, *args, **kwargs):
+        self._button_map = {"a": {"type": "button", "value": 0}}
+
     def init(self):
         return True
 
@@ -27,6 +30,21 @@ class StubInput:
 
     def poll(self):
         return []
+
+    def poll_raw(self):
+        return []
+
+    def export_button_map(self):
+        return dict(self._button_map)
+
+    def has_custom_mapping(self):
+        return True
+
+    def set_button_map(self, mapping, custom=True):
+        self._button_map = dict(mapping)
+
+    def controller_name(self):
+        return "stub-controller"
 
 
 class StubRenderer:
@@ -479,3 +497,5 @@ async def test_settings_persist_callback_invoked(monkeypatch) -> None:
     assert "volume" in latest
     assert "led_enabled" in latest
     assert "mute_duration_hours" in latest
+    assert latest["button_map"] == {"a": {"type": "button", "value": 0}}
+    assert latest["button_profile_name"] == ""

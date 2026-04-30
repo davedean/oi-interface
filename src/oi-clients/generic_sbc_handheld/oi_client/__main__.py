@@ -165,6 +165,8 @@ async def main():
         agent_id=config.get("agent_id"),
         session_key=config.get("session_key"),
         settings_persist=lambda updates: save_config(config_path, updates),
+        button_map=config.get("button_map") if isinstance(config.get("button_map"), dict) else None,
+        button_profile_name=str(config.get("button_profile_name") or ""),
     )
 
     try:

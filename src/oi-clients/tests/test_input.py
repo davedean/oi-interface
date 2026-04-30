@@ -10,7 +10,7 @@ if str(client_src) not in sys.path:
     sys.path.insert(0, str(client_src))
 
 import oi_client.input as input_mod
-from oi_client.input import InputEvent, Sdl2Input
+from oi_client.input import InputEvent, RawInputEvent, Sdl2Input
 
 
 def _make_poll(events):
@@ -98,3 +98,29 @@ def test_poll_maps_keyboard_and_button_events(monkeypatch) -> None:
     assert InputEvent("button", "x", "pressed", 2) in events
     assert InputEvent("button", "x", "released", 2) in events
     assert InputEvent("button", "up", "pressed", 1) in events
+
+
+def test_poll_raw_emits_unmapped_button_and_hat(monkeypatch) -> None:
+    monkeypatch.setattr(
+        input_mod,
+        "SDL_PollEvent",
+        _make_poll([
+            {"type": input_mod.SDL_JOYBUTTONDOWN, "button": 9},
+            {"type": input_mod.SDL_JOYHATMOTION, "hat": 1, "value": 8},
+        ]),
+    )
+    inp = Sdl2Input()
+
+    events = inp.poll_raw()
+
+    assert events == [
+        RawInputEvent("button", "pressed", 9, 0),
+        RawInputEvent("hat", "pressed", 8, 1),
+    ]
+
+
+def test_custom_button_map_overrides_default() -> None:
+    inp = Sdl2Input(button_map={"a": {"type": "button", "value": 9}})
+
+    assert inp.has_custom_mapping() is True
+    assert inp.export_button_map()["a"]["value"] == 9
