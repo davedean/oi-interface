@@ -111,6 +111,11 @@ class CommandDispatcher:
             logger.warning("Command %s to device %s timed out after %.1f s", command_id, device_id, timeout)
             return False
 
+    async def _send_built_command(self, device_id: str, message: dict[str, Any], timeout: float) -> bool:
+        """Send a pre-built DATP command envelope via the standard ack path."""
+        payload = message["payload"]
+        return await self.send(device_id, payload["op"], payload["args"], timeout)
+
     # ------------------------------------------------------------------
     # Convenience methods for specific command types
     # ------------------------------------------------------------------
@@ -140,8 +145,11 @@ class CommandDispatcher:
         bool
             True if ack'd by device.
         """
-        msg = build_display_show_status(device_id, state, label)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_display_show_status(device_id, state, label),
+            timeout,
+        )
 
     async def show_card(
         self,
@@ -171,8 +179,11 @@ class CommandDispatcher:
         bool
             True if ack'd.
         """
-        msg = build_display_show_card(device_id, title, options, body)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_display_show_card(device_id, title, options, body),
+            timeout,
+        )
 
     async def show_response_delta(
         self,
@@ -182,8 +193,11 @@ class CommandDispatcher:
         sequence: int | None = None,
         timeout: float = 5.0,
     ) -> bool:
-        msg = build_display_show_response_delta(device_id, text_delta, is_final, sequence)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_display_show_response_delta(device_id, text_delta, is_final, sequence),
+            timeout,
+        )
 
     async def show_progress(
         self,
@@ -193,8 +207,11 @@ class CommandDispatcher:
         sequence: int | None = None,
         timeout: float = 5.0,
     ) -> bool:
-        msg = build_display_show_progress(device_id, text, kind, sequence)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_display_show_progress(device_id, text, kind, sequence),
+            timeout,
+        )
 
     async def cache_put_begin(
         self,
@@ -218,8 +235,11 @@ class CommandDispatcher:
         bool
             True if ack'd.
         """
-        msg = build_audio_cache_put_begin(device_id, response_id)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_audio_cache_put_begin(device_id, response_id),
+            timeout,
+        )
 
     async def cache_put_chunk(
         self,
@@ -249,8 +269,11 @@ class CommandDispatcher:
         bool
             True if ack'd.
         """
-        msg = build_audio_cache_chunk(device_id, response_id, seq, data_b64)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_audio_cache_chunk(device_id, response_id, seq, data_b64),
+            timeout,
+        )
 
     async def cache_put_end(
         self,
@@ -277,8 +300,11 @@ class CommandDispatcher:
         bool
             True if ack'd. Device should transition to RESPONSE_CACHED state.
         """
-        msg = build_audio_cache_put_end(device_id, response_id, sha256)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_audio_cache_put_end(device_id, response_id, sha256),
+            timeout,
+        )
 
     async def audio_play(
         self,
@@ -302,8 +328,11 @@ class CommandDispatcher:
         bool
             True if ack'd. Device should transition to PLAYING state.
         """
-        msg = build_audio_play(device_id, response_id)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_audio_play(device_id, response_id),
+            timeout,
+        )
 
     async def audio_stop(
         self,
@@ -324,8 +353,7 @@ class CommandDispatcher:
         bool
             True if ack'd. Device should transition to READY state.
         """
-        msg = build_audio_stop(device_id)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(device_id, build_audio_stop(device_id), timeout)
 
     async def set_brightness(
         self,
@@ -349,8 +377,11 @@ class CommandDispatcher:
         bool
             True if ack'd.
         """
-        msg = build_device_set_brightness(device_id, level)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_device_set_brightness(device_id, level),
+            timeout,
+        )
 
     async def mute_until(
         self,
@@ -374,8 +405,11 @@ class CommandDispatcher:
         bool
             True if ack'd. Device should transition to MUTED state.
         """
-        msg = build_device_mute_until(device_id, until)
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
+        return await self._send_built_command(
+            device_id,
+            build_device_mute_until(device_id, until),
+            timeout,
+        )
 
     # ------------------------------------------------------------------
     # Character rendering
@@ -413,9 +447,8 @@ class CommandDispatcher:
         bool
             True if the device acknowledged success.
         """
-        msg = build_command(
+        return await self._send_built_command(
             device_id,
-            "character.set_state",
-            {"pack_id": pack_id} if pack_id is not None else {"pack_id": None},
+            build_command(device_id, "character.set_state", {"pack_id": pack_id}),
+            timeout,
         )
-        return await self.send(device_id, msg["payload"]["op"], msg["payload"]["args"], timeout)
