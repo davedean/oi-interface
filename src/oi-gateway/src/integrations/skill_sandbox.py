@@ -7,6 +7,7 @@ flash firmware, or bypass local mute.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -409,6 +410,11 @@ class ForbiddenOperationError(SkillSandboxError):
     pass
 
 
+FORBIDDEN_IMPORTS = ["os", "sys", "subprocess", "socket", "requests", "http"]
+FORBIDDEN_CALLS = ["eval", "exec", "open", "__import__"]
+FORBIDDEN_ATTRIBUTE_CALLS = [("importlib", "import_module")]
+
+
 class SkillSandbox:
     """Sandboxed execution environment for custom skills using subprocess isolation.
 
@@ -657,29 +663,65 @@ class SkillSandbox:
         This includes checking for dangerous imports and operations that
         could affect firmware (button rebinding, firmware flashing, etc.)
         """
-        forbidden_imports = ["os", "sys", "subprocess", "socket", "requests", "http"]
-        for imp in forbidden_imports:
-            if f"import {imp}" in code or f"from {imp} " in code:
-                raise SkillValidationError(f"Forbidden import: {imp}")
+        tree = ast.parse(code)
 
-        forbidden_pattern = self._find_forbidden_pattern(code, ["eval(", "exec(", "open("])
-        if forbidden_pattern is not None:
-            raise SkillValidationError(f"Forbidden pattern: {forbidden_pattern}")
+        forbidden_import = self._find_forbidden_import(tree)
+        if forbidden_import is not None:
+            raise SkillValidationError(f"Forbidden import: {forbidden_import}")
 
-        firmware_pattern = self._find_forbidden_operation(code)
+        forbidden_call = self._find_forbidden_call(tree)
+        if forbidden_call is not None:
+            raise SkillValidationError(f"Forbidden pattern: {forbidden_call}")
+
+        firmware_pattern = self._find_forbidden_operation(tree)
         if firmware_pattern is not None:
             raise SkillValidationError(
                 f"Forbidden operation that could affect firmware: {firmware_pattern}"
             )
 
-    def _find_forbidden_pattern(self, code: str, patterns: list[str]) -> str | None:
-        for pattern in patterns:
-            if pattern in code:
-                return pattern
+    def _find_forbidden_import(self, tree: ast.AST) -> str | None:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    module_name = alias.name.split(".", 1)[0]
+                    if module_name in FORBIDDEN_IMPORTS:
+                        return module_name
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                module_name = node.module.split(".", 1)[0]
+                if module_name in FORBIDDEN_IMPORTS:
+                    return module_name
         return None
 
-    def _find_forbidden_operation(self, code: str) -> str | None:
-        return self._find_forbidden_pattern(code.lower(), self.FORBIDDEN_PATTERNS)
+    def _find_forbidden_call(self, tree: ast.AST) -> str | None:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALLS:
+                return f"{node.func.id}("
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+                attribute_call = (node.func.value.id, node.func.attr)
+                if attribute_call in FORBIDDEN_ATTRIBUTE_CALLS:
+                    return f"{node.func.value.id}.{node.func.attr}("
+        return None
+
+    def _find_forbidden_operation(self, tree: ast.AST) -> str | None:
+        for node in ast.walk(tree):
+            for candidate in self._iter_operation_candidates(node):
+                lowered = candidate.lower()
+                for pattern in self.FORBIDDEN_PATTERNS:
+                    if pattern in lowered:
+                        return pattern
+        return None
+
+    def _iter_operation_candidates(self, node: ast.AST) -> list[str]:
+        candidates: list[str] = []
+        if isinstance(node, ast.Name):
+            candidates.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            candidates.append(node.attr)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            candidates.append(node.value)
+        return candidates
 
     def _check_operation_allowed(self, code: str) -> bool:
         """Check if code contains any forbidden operations.
@@ -687,7 +729,11 @@ class SkillSandbox:
         This is the firmware protection layer - even after validation,
         we check at execution time.
         """
-        forbidden_pattern = self._find_forbidden_operation(code)
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return True
+        forbidden_pattern = self._find_forbidden_operation(tree)
         if forbidden_pattern is not None:
             logger.warning("Blocked forbidden operation in code: %s", forbidden_pattern)
             return False

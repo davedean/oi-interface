@@ -208,8 +208,19 @@ class TestSkillSandboxFirmwareProtection:
             description="Imports os",
             code="import os; result = os.name",
         )
-        
+
         with pytest.raises(SkillValidationError, match="Forbidden import"):
+            sandbox.register_skill(skill)
+
+    def test_forbidden_import_via___import___blocked(self, sandbox):
+        """Test that dynamic __import__ access is blocked."""
+        skill = Skill(
+            name="dynamic_import_skill",
+            description="Imports os dynamically",
+            code='result = __import__("os").name',
+        )
+
+        with pytest.raises(SkillValidationError, match="Forbidden pattern"):
             sandbox.register_skill(skill)
 
 
