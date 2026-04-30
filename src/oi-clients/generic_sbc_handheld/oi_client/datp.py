@@ -172,7 +172,6 @@ class DatpClient:
             op = payload.get("op", "")
             args = payload.get("args", {})
             queued = {
-                "command_id": msg.get("id", ""),
                 "op": op,
                 "args": args,
             }
@@ -181,6 +180,7 @@ class DatpClient:
             if len(self._received_commands) > 100:
                 self._received_commands = self._received_commands[-100:]
             await self._cmd_queue.put(queued)
+            await self.ack_command(msg.get("id", ""), True, op=op, args=args)
 
         elif msg_type == "error":
             code = payload.get("code", "")

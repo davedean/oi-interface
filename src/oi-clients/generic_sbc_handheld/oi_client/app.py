@@ -283,7 +283,7 @@ class HandheldApp:
             # Process DATP commands
             if self.datp:
                 for cmd in self.datp.get_commands():
-                    await self._handle_command(cmd)
+                    self._handle_command(cmd)
                 # Check connection status
                 if not self.datp.is_connected and self._online:
                     self._online = False
@@ -537,18 +537,14 @@ class HandheldApp:
     # Command handling (from gateway)
     # ------------------------------------------------------------------
 
-    async def _handle_command(self, cmd: dict) -> None:
+    def _handle_command(self, cmd: dict) -> bool:
         op = cmd.get("op", "")
         args = cmd.get("args", {})
-        command_id = cmd.get("command_id", "")
         handler = self._command_handlers.get(op)
-        ok = False
         if handler is None:
             logger.warning("Unhandled gateway command: %s", op)
-        else:
-            ok = bool(handler(op, args))
-        if self.datp and command_id:
-            await self.datp.ack_command(command_id, ok, op=op, args=args)
+            return False
+        return bool(handler(op, args))
 
     def _handle_display_show_status(self, _op: str, args: dict) -> bool:
         state = args.get("state", "")
