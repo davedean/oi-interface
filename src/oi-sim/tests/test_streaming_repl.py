@@ -1,74 +1,27 @@
-"""Tests for the streaming REPL."""
+from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
-import sys
-sys.path.insert(0, 'src/oi-sim/src')
 
 from sim.streaming_repl import StreamingOiSimREPL
 
 
 class FakeSim:
-    """Fake OiSim for testing."""
     def __init__(self):
         self.received_commands = []
         self.received_messages = []
         self.is_connected = True
-        self.state = type('State', (), {'value': 'idle'})()
+        self.state = SimpleNamespace(value="THINKING")
         self.display_state = None
         self.display_label = None
         self.muted_until = None
         self.volume = 50
         self.brightness = 128
-
-    async def connect(self):
-        pass
-
-    async def disconnect(self):
-        pass
-
-    async def press_long_hold(self):
-        pass
-
-    async def release(self):
-        pass
-
-    async def press_button(self):
-        pass
-
-    async def double_tap(self):
-        pass
-
-    async def press_very_long_hold(self):
-        pass
-
-    async def send_playback_started(self, response_id):
-        pass
-
-    async def send_playback_finished(self):
-        pass
+        self.calls = []
 
     async def send_text_prompt(self, text):
-        # Simulate gateway streaming text via display.show_text_delta commands
-        self.received_commands.append({
-            "op": "display.show_text_delta",
-            "args": {"text_delta": "Hello", "is_final": False, "sequence": 0},
-        })
-        self.received_commands.append({
-            "op": "display.show_text_delta",
-            "args": {"text_delta": " world!", "is_final": True, "sequence": 1},
-        })
-
-    async def send_battery_update(self, percent):
-        pass
-
-    async def send_charging_started(self):
-        pass
-
-    async def send_charging_stopped(self):
-        pass
-
-    async def send_wifi_update(self, rssi):
-        pass
+        self.calls.append(("text", text))
 
 
 @pytest.fixture
@@ -78,73 +31,112 @@ def fake_sim():
 
 @pytest.fixture
 def repl(fake_sim):
-    repl = StreamingOiSimREPL(gateway="ws://fake", device_id="test")
-    repl.sim = fake_sim
-    repl.running = False  # Disable main loop
-    return repl
+    app = StreamingOiSimREPL(gateway="ws://fake", device_id="test")
+    app.sim = fake_sim
+    return app
 
 
-class TestStreamingRepl:
-    """Tests for StreamingOiSimREPL."""
+@pytest.mark.asyncio
+async def test_receive_loop_renders_progress_streaming_and_cards(repl, fake_sim, capsys, monkeypatch):
+    fake_sim.received_commands = [
+        {"op": "display.show_progress", "args": {"text": "thinking..."}},
+        {"op": "display.show_response_delta", "args": {"text_delta": "Hello", "is_final": False}},
+        {"op": "display.show_response_delta", "args": {"text_delta": " world", "is_final": True}},
+        {"op": "display.show_response_delta", "args": {"text_delta": "\n[thinking] calling tool\n", "is_final": False}},
+        {"op": "display.show_card", "args": {"title": "Done", "body": "Answer"}},
+    ]
+    repl.running = True
 
-    def test_receive_loop_detects_streaming_events(self, repl, fake_sim):
-        """Test that the receive loop picks up agent_response_delta events."""
-        # Simulate receiving messages
-        fake_sim.received_messages = [
-            {"type": "event", "payload": {"event": "agent_response_delta", "text_delta": "Hello", "is_final": False}},
-            {"type": "event", "payload": {"event": "agent_response_delta", "text_delta": " world!", "is_final": True}},
-        ]
-        
-        # The receive loop would process these
-        # We can just verify the messages are there
-        delta_events = [
-            msg for msg in fake_sim.received_messages
-            if msg.get("type") == "event" and msg.get("payload", {}).get("event") == "agent_response_delta"
-        ]
-        assert len(delta_events) == 2
+    async def fake_sleep(_):
+        repl.running = False
 
-    def test_text_cmd_triggers_streaming_response(self, repl, fake_sim):
-        """Test that text command triggers streaming agent response."""
-        import asyncio
-        asyncio.run(repl._cmd_text(["hello", "there"]))
-        
-        # Verify commands were generated
-        deltas = [
-            cmd for cmd in fake_sim.received_commands
-            if cmd.get("op") == "display.show_text_delta"
-        ]
-        assert len(deltas) == 2
-        assert deltas[0]["args"]["text_delta"] == "Hello"
-        assert deltas[1]["args"]["text_delta"] == " world!"
-        assert deltas[1]["args"]["is_final"] is True
+    monkeypatch.setattr("sim.streaming_repl.asyncio.sleep", fake_sleep)
 
-    def test_response_text_accumulation(self, repl, fake_sim):
-        """Test that streaming chunks accumulate correctly."""
-        repl.current_response_text = ""
-        
-        # Add test messages directly
-        fake_sim.received_messages = [
-            {"type": "event", "payload": {"event": "agent_response_delta", "text_delta": "Hello", "is_final": False}},
-            {"type": "event", "payload": {"event": "agent_response_delta", "text_delta": " world!", "is_final": True}},
-        ]
-        
-        # Simulate receiving chunks
-        for msg in fake_sim.received_messages:
-            if msg.get("type") == "event":
-                payload = msg.get("payload", {})
-                if payload.get("event") == "agent_response_delta":
-                    repl.current_response_text += payload.get("text_delta", "")
-        
-        assert repl.current_response_text == "Hello world!"
+    await repl._receive_loop()
+    out = capsys.readouterr().out
 
-    def test_cmd_help_includes_streaming_info(self, repl):
-        """Test that help mentions streaming."""
-        import asyncio
-        asyncio.run(repl._cmd_help([]))
-        # Just verify it runs without error
+    assert "⚙️  thinking..." in out
+    assert "Hello world" in out
+    assert "⚙️  [thinking] calling tool" in out
+    assert "📥 display.show_card" in out
+    assert "title: Done" in out
+    assert "body: Answer" in out
+    assert repl.current_response_text == ""
+    assert repl._printed_command_count == len(fake_sim.received_commands)
 
-    def test_streaming_repl_inherits_from_base(self, repl):
-        """Test that StreamingOiSimREPL is a proper subclass."""
-        assert isinstance(repl, type(repl).__bases__[0])
-        assert hasattr(repl, 'streaming_active')
-        assert hasattr(repl, 'current_response_text')
+
+@pytest.mark.asyncio
+async def test_cmd_text_prints_streaming_preamble_and_resets_buffer(repl, fake_sim, capsys):
+    repl.current_response_text = "stale"
+
+    await repl._cmd_text(["hello", "there"])
+    out = capsys.readouterr().out
+
+    assert fake_sim.calls == [("text", "hello there")]
+    assert repl.current_response_text == ""
+    assert '📤 text.prompt (text="hello there")' in out
+    assert "📥 State: THINKING" in out
+    assert "💬 Agent:" in out
+
+
+@pytest.mark.asyncio
+async def test_cmd_text_usage(repl, capsys):
+    await repl._cmd_text([])
+    out = capsys.readouterr().out
+    assert "Usage: text <message>" in out
+    assert "Example: text what time is it?" in out
+
+
+@pytest.mark.asyncio
+async def test_cmd_events_reports_empty_and_mixed_history(repl, fake_sim, capsys):
+    await repl._cmd_events([])
+    empty_out = capsys.readouterr().out
+
+    fake_sim.received_messages = [
+        {"type": "command", "payload": {"op": "display.show_card"}},
+        {"type": "event", "payload": {"event": "agent_response_delta", "text_delta": "Hello world"}},
+        {"type": "event", "payload": {"event": "button.pressed"}},
+    ]
+    await repl._cmd_events([])
+    out = capsys.readouterr().out
+
+    assert "No events yet" in empty_out
+    assert "Last 3 messages:" in out
+    assert "📥 display.show_card" in out
+    assert "📤 agent_response_delta: 'Hello world'..." in out
+    assert "📤 button.pressed" in out
+
+
+@pytest.mark.asyncio
+async def test_cmd_help_mentions_streaming(repl, capsys):
+    await repl._cmd_help([])
+    out = capsys.readouterr().out
+    assert "shows streaming response!" in out
+    assert "Streaming: Agent responses appear in real-time" in out
+
+
+@pytest.mark.asyncio
+async def test_main_parses_args_and_starts(monkeypatch):
+    called = {}
+
+    class FakeStreamingRepl:
+        def __init__(self, gateway, device_id):
+            called["gateway"] = gateway
+            called["device_id"] = device_id
+
+        async def start(self):
+            called["started"] = True
+
+    monkeypatch.setattr("sim.streaming_repl.StreamingOiSimREPL", FakeStreamingRepl)
+    monkeypatch.setattr("sys.argv", ["oi-sim-streaming", "--gateway", "ws://gw", "--device-id", "dev-2"])
+
+    from sim import streaming_repl as streaming_module
+
+    await streaming_module.main()
+
+    assert called == {"gateway": "ws://gw", "device_id": "dev-2", "started": True}
+
+
+def test_streaming_repl_inherits_from_base_and_initializes_fields(repl):
+    assert repl.streaming_active is False
+    assert repl.current_response_text == ""

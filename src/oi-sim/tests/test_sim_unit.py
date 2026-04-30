@@ -11,12 +11,16 @@ from sim.state import InvalidTransition, State, StateMachine
 
 
 class FakeWebSocket:
-    def __init__(self) -> None:
+    def __init__(self, recv_messages: list[dict] | None = None) -> None:
         self.sent: list[dict] = []
         self.closed = False
+        self.recv_messages = list(recv_messages or [])
 
     async def send(self, raw: str) -> None:
         self.sent.append(json.loads(raw))
+
+    async def recv(self) -> str:
+        return json.dumps(self.recv_messages.pop(0))
 
     async def close(self) -> None:
         self.closed = True
@@ -241,6 +245,108 @@ class TestOiSimUnitCoverage:
         assert device._pending_acks == {}
         assert device.received_commands == []
         assert device.received_messages == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("method_name", "args", "expected_payload"),
+        [
+            ("tap", (), {"event": "button.tap", "button": "main"}),
+            ("press_button", (), {"event": "button.pressed", "button": "main"}),
+            ("send_playback_started", ("resp-1",), {"event": "audio.playback_started", "response_id": "resp-1"}),
+            ("send_battery_low", (), {"event": "battery_low", "battery_percent": 10}),
+            ("send_charging_started", (), {"event": "charging_started", "battery_percent": 15}),
+            ("send_charging_stopped", (), {"event": "charging_stopped", "battery_percent": 100}),
+            ("send_wifi_connected", ("CafeNet",), {"event": "wifi.connected", "ssid": "CafeNet", "rssi": -50}),
+            ("send_wifi_disconnected", (), {"event": "wifi.disconnected"}),
+            ("send_storage_available", (2048,), {"event": "storage.available", "bytes_free": 2048}),
+            ("send_display_released", (), {"event": "display.released"}),
+        ],
+    )
+    async def test_simple_event_helpers_emit_expected_payloads(self, method_name, args, expected_payload):
+        device, ws = self.make_sim()
+
+        method = getattr(device, method_name)
+        await method(*args)
+
+        assert ws.sent[-1]["type"] == "event"
+        assert ws.sent[-1]["payload"] == expected_payload
+
+    @pytest.mark.asyncio
+    async def test_press_very_long_hold_transitions_and_sends_event(self):
+        device, ws = self.make_sim()
+
+        await device.press_very_long_hold()
+
+        assert device.state == State.MUTED
+        assert ws.sent[-1]["payload"] == {
+            "event": "button.very_long_hold_started",
+            "button": "main",
+            "duration_ms": 3000,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("method_name", "args", "expected_code"),
+        [
+            ("simulate_wifi_error", (), "WIFI_ERROR"),
+            ("simulate_timeout_error", (), "TIMEOUT"),
+        ],
+    )
+    async def test_error_simulation_wrappers_emit_expected_codes(self, method_name, args, expected_code):
+        device, ws = self.make_sim()
+
+        await getattr(device, method_name)(*args)
+
+        assert ws.sent[-1]["payload"]["event"] == "device.error"
+        assert ws.sent[-1]["payload"]["code"] == expected_code
+
+    @pytest.mark.asyncio
+    async def test_connect_raises_when_handshake_does_not_return_hello_ack(self, monkeypatch):
+        fake_ws = FakeWebSocket(recv_messages=[{"type": "event", "payload": {}}])
+
+        async def fake_connect(_gateway):
+            return fake_ws
+
+        monkeypatch.setattr("sim.sim.websockets.connect", fake_connect)
+        device = OiSim(gateway="ws://example.invalid/datp")
+
+        with pytest.raises(RuntimeError, match="Expected hello_ack"):
+            await device.connect()
+
+        assert fake_ws.sent[0]["type"] == "hello"
+
+    @pytest.mark.asyncio
+    async def test_connect_populates_session_and_starts_listener(self, monkeypatch):
+        fake_ws = FakeWebSocket(recv_messages=[{"type": "hello_ack", "payload": {"session_id": "sess-123"}}])
+
+        async def fake_connect(_gateway):
+            return fake_ws
+
+        monkeypatch.setattr("sim.sim.websockets.connect", fake_connect)
+
+        listener_started = asyncio.Event()
+
+        async def fake_listen_loop():
+            listener_started.set()
+
+        device = OiSim(gateway="ws://example.invalid/datp")
+        device._listen_loop = fake_listen_loop
+
+        await device.connect()
+        await listener_started.wait()
+
+        assert device.is_connected is True
+        assert device._session_id == "sess-123"
+        await device.disconnect()
+
+    def test_display_properties_proxy_state_machine_fields(self):
+        device = OiSim()
+        device._state_machine.receive_command("display.show_status", {"state": "thinking", "label": "Working"})
+        device._state_machine.receive_command("device.mute_until", {"until": "later"})
+
+        assert device.display_state == "thinking"
+        assert device.display_label == "Working"
+        assert device.muted_until == "later"
 
     def test_package_exports_and_lazy_attributes(self):
         assert sim.__all__ == [

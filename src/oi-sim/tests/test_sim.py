@@ -1247,11 +1247,11 @@ async def test_trace_output_writes_jsonl(datp_server, tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_text_prompt_full_roundtrip(datp_server):
-    """Full roundtrip: text prompt -> gateway -> agent -> response.
-    
-    This test verifies the complete flow with a mock agent backend that returns
-    text, and verifies the device receives a display.show_card command.
+async def test_text_prompt_event_flow_without_agent_response(datp_server):
+    """Text prompts reach the gateway and leave the device in THINKING.
+
+    This test verifies only the device->gateway event flow; it does not mock
+    an agent response back to the device.
     """
     device = OiSim(gateway=f"ws://localhost:{datp_server.port}/datp", device_id="oi-sim-roundtrip")
     await device.connect()
@@ -1272,10 +1272,9 @@ async def test_text_prompt_full_roundtrip(datp_server):
         # Device should be in THINKING state
         device.assert_state(State.THINKING)
 
-        # Verify text.prompt event was sent
+        # No agent backend is mocked here, so no response command should arrive.
         text_events = [e for e in commands_received if e.get("op") == "display.show_card"]
-        # Note: In a real end-to-end test, the agent would respond and we'd get
-        # a display.show_card. For unit test purposes, we just verify the event flow.
+        assert text_events == []
     finally:
         datp_server.event_bus.unsubscribe(handler)
         await device.disconnect()

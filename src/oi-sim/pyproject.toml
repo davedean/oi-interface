@@ -28,11 +28,6 @@ pythonpath = ["src", "../../oi-gateway/src"]
 
 [tool.coverage.run]
 branch = true
-omit = [
-    "*/src/sim/repl.py",
-    "*/src/sim/streaming_repl.py",
-    "*/src/sim/fixtures.py",
-]
 
 [tool.coverage.report]
 show_missing = true
