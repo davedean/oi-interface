@@ -17,6 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATEWAY_DIR="${SCRIPT_DIR}/src/oi-gateway"
+VENV_DIR="${SCRIPT_DIR}/.venv"
 resolve_oi_home() {
     if [[ -n "${OI_HOME:-}" ]]; then
         echo "${OI_HOME}"
@@ -54,6 +55,22 @@ log_info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
 log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_err()   { echo -e "${RED}[ERR]${NC}   $*"; }
+
+python_cmd() {
+    if [[ -x "${VENV_DIR}/bin/python" ]]; then
+        echo "${VENV_DIR}/bin/python"
+    else
+        echo "python3"
+    fi
+}
+
+pip_cmd() {
+    if [[ -x "${VENV_DIR}/bin/pip" ]]; then
+        echo "${VENV_DIR}/bin/pip"
+    else
+        echo "python3 -m pip"
+    fi
+}
 
 mkdir -p "${PID_DIR}"
 mkdir -p "${OI_LOGS_DIR}"
@@ -146,7 +163,9 @@ validate_backend_config() (
     fi
 
     cd "${GATEWAY_DIR}" || exit 1
-    PYTHONPATH="${GATEWAY_DIR}/src" python3 -c "
+    local py
+    py="$(python_cmd)"
+    PYTHONPATH="${GATEWAY_DIR}/src" "${py}" -c "
 from channel.factory import create_backend_from_env
 backend = create_backend_from_env()
 print(type(backend).__name__)
@@ -174,7 +193,7 @@ is_gateway_running() {
 is_port_listening() {
     local port=$1
     if nc -z localhost "${port}" 2>/dev/null || \
-       python3 -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('localhost',${port})); s.close(); exit(0 if r==0 else 1)" 2>/dev/null; then
+       "$(python_cmd)" -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('localhost',${port})); s.close(); exit(0 if r==0 else 1)" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -285,7 +304,7 @@ cmd_start() {
             OI_OPENCLAW_TOKEN="${OI_OPENCLAW_TOKEN:-}" \
             OI_OPENCLAW_TIMEOUT_SECONDS="${OI_OPENCLAW_TIMEOUT_SECONDS:-120}" \
             PYTHONPATH="${GATEWAY_DIR}/src" \
-            python3 -m gateway_app \
+            "$(python_cmd)" -m gateway_app \
             >> "${LOG_FILE}" 2>&1 &
 
         local gateway_pid=$!
@@ -550,14 +569,14 @@ cmd_test() {
 
     # Check WebSocket connectivity with Python
     if is_port_listening "${GATEWAY_PORT}"; then
-        if python3 -c "
+        if "$(python_cmd)" -c "
 import asyncio, websockets, json, sys
 async def test():
     try:
         ws = await asyncio.wait_for(websockets.connect('ws://localhost:${GATEWAY_PORT}/datp'), timeout=2)
         hello = {'v':'datp','type':'hello','id':'test','device_id':'test-device','ts':'2026-01-01T00:00:00.000Z','payload':{'device_type':'test','protocol':'datp','firmware':'test','capabilities':{},'state':{}}}
         await ws.send(json.dumps(hello))
-        resp = await asyncio.wait_for(ws.recv(), timeout=2)
+        await asyncio.wait_for(ws.recv(), timeout=2)
         print('Gateway accepts WebSocket connections: YES')
         await ws.close()
     except Exception as e:
