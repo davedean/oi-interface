@@ -452,14 +452,18 @@ class MultiDeviceManager:
         str or None
             Best device ID, or None if no suitable device.
         """
-        # Build affinity map for this request
         affinities: dict[str, list[DeviceAffinity]] = {}
+        preferred_device = None
 
-        # Add user affinities if provided
         if user_id and user_id in self._affinities:
-            affinities[user_id] = self._affinities[user_id]
+            user_affinities = [
+                affinity
+                for affinity in self._affinities[user_id]
+                if affinity.target_id in available_devices
+            ]
+            if user_affinities:
+                preferred_device = max(user_affinities, key=lambda affinity: affinity.strength).target_id
 
-        # Add device-to-device affinities
         for device_id in available_devices:
             if device_id in self._affinities:
                 affinities[device_id] = self._affinities[device_id]
@@ -467,6 +471,7 @@ class MultiDeviceManager:
         return self._load_balancer.select_device(
             available_devices,
             affinities,
+            preferred_device=preferred_device,
         )
 
     # -------------------------------------------------------------------------

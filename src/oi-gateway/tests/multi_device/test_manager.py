@@ -319,6 +319,21 @@ class TestMultiDeviceManager:
         # Should select stick-002 (lowest load)
         assert best == "stick-002"
 
+    def test_get_best_device_for_task_uses_user_affinity(self):
+        """User affinity should override lower-load devices when available."""
+        manager = MultiDeviceManager()
+        manager.update_device_load("stick-001", cpu_load=0.6)
+        manager.update_device_load("stick-002", cpu_load=0.1)
+        manager.set_affinity("user-001", "stick-001", strength=0.9)
+
+        best = manager.get_best_device_for_task(
+            task_type="voice_input",
+            available_devices=["stick-001", "stick-002"],
+            user_id="user-001",
+        )
+
+        assert best == "stick-001"
+
     # Group tests
     def test_create_group(self):
         """Test creating device group."""
