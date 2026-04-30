@@ -14,8 +14,8 @@ async def retry_request(coro, max_attempts=15, delay=0.2):
     for attempt in range(max_attempts):
         try:
             return await coro()
-        except Exception as e:
-            last_error = e
+        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+            last_error = error
             if attempt < max_attempts - 1:
                 await asyncio.sleep(delay * (attempt + 1))
     raise last_error
