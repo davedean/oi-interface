@@ -77,59 +77,7 @@ class GatewayAPI:
     async def start(self) -> None:
         """Start the HTTP server."""
         self._app = web.Application()
-        self._app.router.add_route("GET", "/api/health", self._health)
-        self._app.router.add_route("GET", "/api/devices", self._devices_list)
-        self._app.router.add_route("GET", "/api/devices/{device_id}", self._device_info)
-        self._app.router.add_route(
-            "POST", "/api/devices/{device_id}/commands/show_status", self._cmd_show_status
-        )
-        self._app.router.add_route(
-            "POST", "/api/devices/{device_id}/commands/mute_until", self._cmd_mute_until
-        )
-        self._app.router.add_route(
-            "POST", "/api/devices/{device_id}/commands/audio_play", self._cmd_audio_play
-        )
-        self._app.router.add_route(
-            "POST", "/api/devices/{device_id}/character", self._set_device_character
-        )
-        self._app.router.add_route(
-            "GET", "/api/character_packs", self._character_packs_list
-        )
-        self._app.router.add_route(
-            "GET", "/api/character_packs/{pack_id}", self._character_pack_info
-        )
-        self._app.router.add_route(
-            "POST", "/api/route", self._route
-        )
-        self._app.router.add_route(
-            "POST", "/api/route/multi", self._route_multi
-        )
-        self._app.router.add_route(
-            "POST", "/api/devices/{device_id}/foreground", self._set_foreground
-        )
-        self._app.router.add_route(
-            "GET", "/api/devices/{device_id}/health", self._device_health
-        )
-        self._app.router.add_route(
-            "POST", "/api/devices/{device_id}/interactions", self._record_interaction
-        )
-
-        # Coding workflow endpoints
-        self._app.router.add_route(
-            "GET", "/api/coding/status", self._coding_status
-        )
-        self._app.router.add_route(
-            "GET", "/api/coding/last_result", self._coding_last_result
-        )
-        self._app.router.add_route(
-            "POST", "/api/coding/enable", self._coding_enable
-        )
-        self._app.router.add_route(
-            "POST", "/api/coding/disable", self._coding_disable
-        )
-        self._app.router.add_route(
-            "POST", "/api/coding/clear_history", self._coding_clear_history
-        )
+        self._register_routes(self._app)
 
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
@@ -151,6 +99,33 @@ class GatewayAPI:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _register_routes(self, app: web.Application) -> None:
+        for method, path, handler in self._routes():
+            app.router.add_route(method, path, handler)
+
+    def _routes(self) -> tuple[tuple[str, str, Any], ...]:
+        return (
+            ("GET", "/api/health", self._health),
+            ("GET", "/api/devices", self._devices_list),
+            ("GET", "/api/devices/{device_id}", self._device_info),
+            ("POST", "/api/devices/{device_id}/commands/show_status", self._cmd_show_status),
+            ("POST", "/api/devices/{device_id}/commands/mute_until", self._cmd_mute_until),
+            ("POST", "/api/devices/{device_id}/commands/audio_play", self._cmd_audio_play),
+            ("POST", "/api/devices/{device_id}/character", self._set_device_character),
+            ("GET", "/api/character_packs", self._character_packs_list),
+            ("GET", "/api/character_packs/{pack_id}", self._character_pack_info),
+            ("POST", "/api/route", self._route),
+            ("POST", "/api/route/multi", self._route_multi),
+            ("POST", "/api/devices/{device_id}/foreground", self._set_foreground),
+            ("GET", "/api/devices/{device_id}/health", self._device_health),
+            ("POST", "/api/devices/{device_id}/interactions", self._record_interaction),
+            ("GET", "/api/coding/status", self._coding_status),
+            ("GET", "/api/coding/last_result", self._coding_last_result),
+            ("POST", "/api/coding/enable", self._coding_enable),
+            ("POST", "/api/coding/disable", self._coding_disable),
+            ("POST", "/api/coding/clear_history", self._coding_clear_history),
+        )
 
     def _json_response(self, data: Any, status: int = 200) -> web.Response:
         return web.Response(
