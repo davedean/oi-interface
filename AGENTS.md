@@ -19,7 +19,7 @@ Oi is a local-first I/O layer for personal agents. Keep changes aligned with dev
 - `src/oi-sim/` — virtual device simulator
 - `src/oi-cli/` — CLI surface over gateway APIs
 - `src/oi-dashboard/` — monitoring/debug UI
-- `src/oi-clients/` — firmware planning/scaffolding
+- `src/oi-clients/` — device client implementations/planning
 
 ## Validation
 

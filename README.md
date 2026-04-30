@@ -62,7 +62,7 @@ src/                 ← v2 implementation
   oi-sim/            ← virtual DATP device for dev and CI
   oi-cli/            ← CLI wrapper over the gateway API
   oi-dashboard/      ← monitoring and debug dashboard
-  oi-clients/       ← firmware planning and scaffolding
+  oi-clients/       ← device client implementations and planning
 oi-project-docs/     ← public specs and architecture docs
 ```
 

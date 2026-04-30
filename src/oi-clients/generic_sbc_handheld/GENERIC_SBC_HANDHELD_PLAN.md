@@ -407,7 +407,7 @@ src/oi-clients/generic_sbc_handheld/
     └── font.ttf
 ```
 
-A real implementation may later move to `src/oi-sbc-client/` if it outgrows the firmware directory.
+A real implementation may later move to `src/oi-sbc-client/` if it outgrows the `src/oi-clients/` directory.
 
 ## 19. Recommendation
 

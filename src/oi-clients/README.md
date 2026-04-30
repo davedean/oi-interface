@@ -1,6 +1,6 @@
 # oi-clients
 
-Firmware-related target work for Oi devices.
+Device client target work for Oi devices (firmware and higher-level client runtimes).
 
 ## Current targets
 
