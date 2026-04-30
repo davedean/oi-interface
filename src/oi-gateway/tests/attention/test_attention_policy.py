@@ -144,6 +144,16 @@ class TestAttentionPolicy:
         assert result is True
         assert policy.current_attention == "stick-002"
 
+    def test_acquire_attention_ignores_priority_when_disabled(self):
+        """Priority checks are skipped when the priority system is disabled."""
+        policy = AttentionPolicy(config=AttentionConfig(enable_priority=False))
+        policy.acquire_attention(device_id="stick-001", priority=10)
+
+        result = policy.acquire_attention(device_id="stick-002", priority=1)
+
+        assert result is True
+        assert policy.current_attention == "stick-002"
+
     def test_release_attention(self):
         """Test releasing attention."""
         policy = AttentionPolicy()

@@ -6,7 +6,7 @@ distinct from foreground (most recent input device).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
@@ -180,8 +180,9 @@ class AttentionPolicy:
         if self._current_attention and self._current_attention != device_id:
             current_state = self._device_attention.get(self._current_attention)
             new_priority = priority if priority is not None else self._config.default_priority
+            attention_interrupted = False
 
-            if current_state and current_state.priority > new_priority:
+            if self._config.enable_priority and current_state and current_state.priority > new_priority:
                 logger.debug(
                     "attention denied: device %s priority %d < current %d",
                     device_id,
@@ -192,6 +193,9 @@ class AttentionPolicy:
                 self._queue_for_attention(device_id, priority or self._config.default_priority)
                 return False
 
+            if self._config.enable_priority and current_state and current_state.priority < new_priority:
+                attention_interrupted = True
+
             # If we can overtake, release current attention (if not requiring explicit release)
             if self._config.require_explicit_release:
                 # Explicit release required - cannot switch without explicit release
@@ -201,7 +205,10 @@ class AttentionPolicy:
                 )
                 return False
             else:
-                self._release_current_attention(transition=AttentionTransition.IMPLICIT)
+                transition_to_use = (
+                    AttentionTransition.INTERRUPTED if attention_interrupted else AttentionTransition.IMPLICIT
+                )
+                self._release_current_attention(transition=transition_to_use)
 
         now = self._get_time()
 
