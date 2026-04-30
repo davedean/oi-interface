@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
 from .backend import AgentBackend, AgentBackendError, AgentRequest, AgentResponse, AgentStreamChunk
@@ -13,8 +14,16 @@ from .request_builder import render_text_prompt
 
 logger = logging.getLogger(__name__)
 
+
 class PiBackendError(AgentBackendError):
     """Backward-compatible alias for Pi backend failures."""
+
+
+@dataclass
+class _StreamState:
+    sent_text: str = ""
+    response_text: str = ""
+    responded: bool = False
 
 
 class SubprocessPiBackend(AgentBackend):
@@ -46,7 +55,6 @@ class SubprocessPiBackend(AgentBackend):
             correlation_id=request.correlation_id,
         )
 
-
     async def _read_events_from_prompt(self, message: str):
         """Read events from pi subprocess as an async generator yielding AgentStreamChunk."""
         logger.debug(
@@ -65,127 +73,42 @@ class SubprocessPiBackend(AgentBackend):
             stderr=asyncio.subprocess.PIPE,
         )
 
-        prompt_line = json.dumps({"type": "prompt", "message": message}) + "\n"
-        proc.stdin.write(prompt_line.encode())
-        await proc.stdin.drain()
-
-        terminal_event_types = {"agent_end", "end", "completed", "response_end"}
-        last_text: str | None = None
-        responded = False
-        response_text = ""
-        sent_text = ""  # Track what we've already sent
+        await self._write_prompt(proc, message)
+        state = _StreamState()
 
         try:
             while True:
-                raw = await asyncio.wait_for(proc.stdout.readline(), timeout=self._timeout_seconds)
-                if not raw:
-                    if sent_text and sent_text.strip():
-                        response_text = sent_text
+                event = await self._read_event(proc)
+                if event is None:
+                    if state.sent_text.strip():
+                        state.response_text = state.sent_text
                     break
 
-                line = raw.decode(errors="replace").strip()
-                if not line:
-                    continue
+                chunk = self._build_text_chunk(event, state)
+                if chunk is not None:
+                    yield chunk
 
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise PiBackendError(f"malformed JSON from pi stdout: {line}") from exc
+                terminal_chunk = self._build_terminal_chunk(event, state)
+                if terminal_chunk is not None:
+                    yield terminal_chunk
+                    break
 
-                if not isinstance(event, dict):
-                    logger.debug("Ignoring non-object pi event: %r", event)
-                    continue
-
-                event_type = event.get("type")
-                extracted, is_incremental = self._extract_text(event)
-                emitted = False
-                if extracted and extracted.strip():
-                    if is_incremental:
-                        # Some providers send true token deltas, others send growing snapshots.
-                        if extracted.startswith(sent_text):
-                            delta = extracted[len(sent_text):]
-                            sent_text = extracted
-                        else:
-                            delta = extracted
-                            sent_text = sent_text + delta
-                        response_text = sent_text
+                if chunk is None:
+                    progress_chunk = self._build_progress_chunk(event)
+                    if progress_chunk is not None:
+                        yield progress_chunk
                     else:
-                        if extracted.startswith(sent_text):
-                            delta = extracted[len(sent_text):]
-                        else:
-                            delta = extracted
-                        sent_text = extracted
-                        response_text = extracted
-
-                    if delta:
-                        is_final = event_type in terminal_event_types
-                        emitted = True
-                        yield AgentStreamChunk(
-                            text_delta=delta,
-                            is_final=is_final,
-                            metadata={"event_type": event_type} if event_type else {},
-                        )
-
-                if event_type in terminal_event_types:
-                    event_text, _ = self._extract_text(event)
-                    if event_text and event_text.strip() and not responded:
-                        responded = True
-                        response_text = event_text
-                        if event_text.startswith(sent_text):
-                            final_delta = event_text[len(sent_text):]
-                        else:
-                            final_delta = event_text
-                        sent_text = event_text
-                        yield AgentStreamChunk(
-                            text_delta=final_delta,
-                            is_final=True,
-                            metadata={"event_type": event_type},
-                        )
-                        break
-                    if sent_text.strip() and not responded:
-                        responded = True
-                        response_text = sent_text
-                        yield AgentStreamChunk(
-                            text_delta="",
-                            is_final=True,
-                            metadata={"event_type": event_type},
-                        )
-                        break
-                    continue
-
-                if not emitted:
-                    progress_text = self._extract_progress_text(event)
-                    if progress_text:
-                        yield AgentStreamChunk(
-                            text_delta="",
-                            is_final=False,
-                            metadata={"event_type": event_type, "progress_text": progress_text},
-                        )
-                    elif event_type == "message_update":
-                        logger.debug(
-                            "No streamable text extracted from message_update assistantMessageEvent=%r",
-                            event.get("assistantMessageEvent"),
-                        )
-                    else:
-                        logger.debug("Ignoring non-terminal pi event type=%r", event_type)
+                        self._log_ignored_event(event)
         except asyncio.TimeoutError as exc:
             raise PiBackendError(
                 f"pi subprocess timed out waiting for response after {self._timeout_seconds:.1f}s"
             ) from exc
         finally:
-            with contextlib.suppress(Exception):
-                if proc.stdin and not proc.stdin.is_closing():
-                    proc.stdin.close()
-            if proc.returncode is None:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            await self._cleanup_process(proc)
 
-        # If we never yielded anything but have text, yield it as final
-        if response_text and not responded:
+        if state.response_text and not state.responded:
             yield AgentStreamChunk(
-                text_delta=response_text,
+                text_delta=state.response_text,
                 is_final=True,
                 metadata={"event_type": "complete"},
             )
@@ -213,7 +136,136 @@ class SubprocessPiBackend(AgentBackend):
         async for chunk in self._read_events_from_prompt(message):
             yield chunk
 
-    def _extract_text(self, event: dict[str, Any]) -> tuple[str | None, bool]:
+    async def _write_prompt(self, proc: asyncio.subprocess.Process, message: str) -> None:
+        prompt_line = json.dumps({"type": "prompt", "message": message}) + "\n"
+        assert proc.stdin is not None
+        proc.stdin.write(prompt_line.encode())
+        await proc.stdin.drain()
+
+    async def _read_event(self, proc: asyncio.subprocess.Process) -> dict[str, Any] | None:
+        assert proc.stdout is not None
+        raw = await asyncio.wait_for(proc.stdout.readline(), timeout=self._timeout_seconds)
+        if not raw:
+            return None
+
+        line = raw.decode(errors="replace").strip()
+        if not line:
+            return {}
+
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise PiBackendError(f"malformed JSON from pi stdout: {line}") from exc
+
+        if not isinstance(event, dict):
+            logger.debug("Ignoring non-object pi event: %r", event)
+            return {}
+        return event
+
+    def _build_text_chunk(self, event: dict[str, Any], state: _StreamState) -> AgentStreamChunk | None:
+        event_type = event.get("type")
+        extracted = self._extract_text(event)
+        if extracted is None:
+            return None
+
+        text, is_incremental = extracted
+        delta = self._consume_text(text, is_incremental, state)
+        if not delta:
+            return None
+
+        return AgentStreamChunk(
+            text_delta=delta,
+            is_final=event_type in self._terminal_event_types(),
+            metadata={"event_type": event_type} if event_type else {},
+        )
+
+    def _build_terminal_chunk(self, event: dict[str, Any], state: _StreamState) -> AgentStreamChunk | None:
+        event_type = event.get("type")
+        if event_type not in self._terminal_event_types():
+            return None
+
+        extracted = self._extract_text(event)
+        if extracted is not None:
+            final_text, _ = extracted
+            state.responded = True
+            state.response_text = final_text
+            final_delta = self._finalize_text(final_text, state)
+            return AgentStreamChunk(
+                text_delta=final_delta,
+                is_final=True,
+                metadata={"event_type": event_type},
+            )
+
+        if state.sent_text.strip() and not state.responded:
+            state.responded = True
+            state.response_text = state.sent_text
+            return AgentStreamChunk(
+                text_delta="",
+                is_final=True,
+                metadata={"event_type": event_type},
+            )
+        return None
+
+    def _build_progress_chunk(self, event: dict[str, Any]) -> AgentStreamChunk | None:
+        progress_text = self._extract_progress_text(event)
+        if not progress_text:
+            return None
+
+        event_type = event.get("type")
+        metadata = {"progress_text": progress_text}
+        if event_type:
+            metadata["event_type"] = event_type
+        return AgentStreamChunk(text_delta="", is_final=False, metadata=metadata)
+
+    def _log_ignored_event(self, event: dict[str, Any]) -> None:
+        event_type = event.get("type")
+        if event_type == "message_update":
+            logger.debug(
+                "No streamable text extracted from message_update assistantMessageEvent=%r",
+                event.get("assistantMessageEvent"),
+            )
+            return
+        if event_type:
+            logger.debug("Ignoring non-terminal pi event type=%r", event_type)
+
+    def _consume_text(self, text: str, is_incremental: bool, state: _StreamState) -> str:
+        if is_incremental:
+            if text.startswith(state.sent_text):
+                delta = text[len(state.sent_text) :]
+                state.sent_text = text
+            else:
+                delta = text
+                state.sent_text += delta
+            state.response_text = state.sent_text
+            return delta
+
+        if text.startswith(state.sent_text):
+            delta = text[len(state.sent_text) :]
+        else:
+            delta = text
+        state.sent_text = text
+        state.response_text = text
+        return delta
+
+    def _finalize_text(self, final_text: str, state: _StreamState) -> str:
+        if final_text.startswith(state.sent_text):
+            delta = final_text[len(state.sent_text) :]
+        else:
+            delta = final_text
+        state.sent_text = final_text
+        return delta
+
+    async def _cleanup_process(self, proc: asyncio.subprocess.Process) -> None:
+        with contextlib.suppress(Exception):
+            if proc.stdin and not proc.stdin.is_closing():
+                proc.stdin.close()
+        if proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+
+    def _extract_text(self, event: dict[str, Any]) -> tuple[str, bool] | None:
         """Extract text plus whether it's incremental (delta) or snapshot/final."""
         event_type = event.get("type")
 
@@ -224,22 +276,22 @@ class SubprocessPiBackend(AgentBackend):
                     text = self._extract_message_text(msg)
                     if text:
                         return text, False
-            return None, False
+            return None
 
         if event_type == "message_end":
             text = self._extract_message_text(event.get("message"))
             if text:
                 return text, False
-            return None, False
+            return None
 
         assistant_event = event.get("assistantMessageEvent")
         if isinstance(assistant_event, dict):
             assistant_event_type = assistant_event.get("type")
             if assistant_event_type in {"text_delta", "text_end", "text_start"}:
                 for key in ("content", "delta", "text"):
-                    val = assistant_event.get(key)
-                    if isinstance(val, str) and val.strip():
-                        return val, (assistant_event_type == "text_delta")
+                    value = assistant_event.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value, assistant_event_type == "text_delta"
 
                 content_value = assistant_event.get("content")
                 if isinstance(content_value, dict):
@@ -251,13 +303,13 @@ class SubprocessPiBackend(AgentBackend):
                 text = self._extract_message_text(partial)
                 if text:
                     return text, False
-            return None, False
+            return None
 
         for key in ("text", "response", "content"):
-            val = event.get(key)
-            if isinstance(val, str) and val.strip():
-                return val, False
-        return None, False
+            value = event.get(key)
+            if isinstance(value, str) and value.strip():
+                return value, False
+        return None
 
     def _extract_progress_text(self, event: dict[str, Any]) -> str | None:
         """Best-effort human-readable progress text from non-terminal events."""
@@ -270,7 +322,6 @@ class SubprocessPiBackend(AgentBackend):
         if event_type == "extension_ui_request":
             method = event.get("method")
             message = event.get("message")
-            # Suppress noisy UI plumbing/status spam
             if isinstance(method, str) and method in {"setWidget", "setStatus"}:
                 if isinstance(message, str) and "Model Tagger" in message:
                     return f"[extension] {message.strip()}"
@@ -291,7 +342,6 @@ class SubprocessPiBackend(AgentBackend):
                         return f"[tool] {name.strip()}"
                     if assistant_type in {"toolcall_start", "toolcall"}:
                         return "[tool] working"
-                    return None
         return None
 
     def _extract_message_text(self, message: Any) -> str | None:
@@ -318,6 +368,10 @@ class SubprocessPiBackend(AgentBackend):
             if chunks:
                 return "".join(chunks)
         return None
+
+    @staticmethod
+    def _terminal_event_types() -> set[str]:
+        return {"agent_end", "end", "completed", "response_end"}
 
     @staticmethod
     def _read_timeout_from_env() -> float:
@@ -373,6 +427,17 @@ class StubPiBackend(AgentBackend):
         self._call_count += 1
         return self._response
 
+    async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
+        """Return a fixed streaming response without spawning a subprocess."""
+        self._last_request = request
+        self._last_message = render_text_prompt(request)
+        self._call_count += 1
+        yield AgentStreamChunk(
+            text_delta=self._response,
+            is_final=True,
+            metadata={"stub": True},
+        )
+
     @property
     def last_message(self) -> str | None:
         return self._last_message
@@ -384,14 +449,3 @@ class StubPiBackend(AgentBackend):
     @property
     def call_count(self) -> int:
         return self._call_count
-    async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
-        """Return a fixed streaming response without spawning a subprocess."""
-        from .request_builder import render_text_prompt
-        self._last_message = render_text_prompt(request)
-        self._call_count += 1
-        yield AgentStreamChunk(
-            text_delta=self._response,
-            is_final=True,
-            metadata={"stub": True},
-        )
-
