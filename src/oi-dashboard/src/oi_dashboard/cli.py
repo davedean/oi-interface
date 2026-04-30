@@ -8,12 +8,6 @@ import sys
 
 from .dashboard import run_dashboard, DEFAULT_HOST, DEFAULT_API_PORT, DEFAULT_DASHBOARD_PORT
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -39,6 +33,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     args = parse_args()
     print(f"Starting Oi Dashboard...")
     print(f"  API: {args.api_url}")
