@@ -19,8 +19,8 @@ export OI_OPENCLAW_TIMEOUT_SECONDS=120
 ```
 
 The backend factory defaults `OI_OPENCLAW_URL` to `ws://127.0.0.1:18789`, so you only need to override it if OpenClaw is listening somewhere else.
-If you use `./start-oi.sh start openclaw`, the launcher will also source `~/.oi/secrets/oi-gateway/openclaw.env.local` and `~/.oi/config/oi-gateway/openclaw.env.local` when they exist.
-Use `./start-oi.sh test all` to check whether `pi`, `hermes`, and `openclaw` are all configured on this machine.
+`oi-gateway` now loads TOML config directly on startup.
+Use `./start-oi.sh test` to check gateway health.
 
 ## Local OpenClaw config
 
@@ -33,24 +33,22 @@ Your OpenClaw Gateway config is already compatible with the defaults used by oi-
 
 For Oi, the browser `controlUi.allowedOrigins` list is not the important part. What matters is that the gateway is up and accepting WebSocket RPC on port `18789`, and that the token exported in `OI_OPENCLAW_TOKEN` matches the OpenClaw auth token.
 
-For a copy-paste env file, see [`openclaw.env.example`](openclaw.env.example).
+For copy-paste TOML examples, see:
+- [`config.toml.example`](config.toml.example)
+- [`secrets.toml.example`](secrets.toml.example)
 
-If you prefer the launcher path, put the token in `~/.oi/secrets/oi-gateway/openclaw.env.local` as `OPENCLAW_GATEWAY_TOKEN` or `OI_OPENCLAW_TOKEN` and the script will map it for `oi-gateway`.
+Set `OI_OPENCLAW_TOKEN` in `~/.oi/secrets/oi-gateway/secrets.toml`.
 
 ## Start order
 
 1. Start OpenClaw Gateway.
-2. Export the environment variables above in the same shell that launches oi-gateway.
+2. Put values in `~/.oi/config/oi-gateway/config.toml` and `~/.oi/secrets/oi-gateway/secrets.toml`.
 3. Start `oi-gateway`.
 
 Example:
 
 ```bash
-cd src/oi-gateway
-export OI_AGENT_BACKEND=openclaw
-export OI_OPENCLAW_URL=ws://127.0.0.1:18789
-export OI_OPENCLAW_TOKEN='<your-openclaw-token>'
-python3 -m oi_gateway
+./start-oi.sh start openclaw
 ```
 
 ## Validation

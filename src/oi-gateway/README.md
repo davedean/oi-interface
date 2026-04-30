@@ -27,10 +27,10 @@ pip install -e ".[dev]"
 PYTHONPATH=src pytest
 ```
 
-Useful docs:
+Useful docs/examples:
 - `OPENCLAW.md`
-- `hermes.env.example`
-- `openclaw.env.example`
+- `config.toml.example`
+- `secrets.toml.example`
 
 ## TODO (setup details to confirm)
 

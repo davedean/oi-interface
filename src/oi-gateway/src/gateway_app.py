@@ -22,6 +22,7 @@ from audio import (
 )
 from text import TextDeliveryPipeline
 from channel import AgentBackend, ChannelService, create_backend_from_env
+from config_loader import load_gateway_toml_config
 from character_packs import CharacterPackStore, CharacterRendererService
 from datp import EventBus
 from datp.commands import CommandDispatcher
@@ -214,7 +215,8 @@ async def run_forever(runtime: GatewayRuntime) -> None:
 
 
 async def main() -> None:
-    """Environment-configured gateway bootstrap."""
+    """TOML + environment configured gateway bootstrap."""
+    load_gateway_toml_config()
     logger.info("Gateway python executable: %s", sys.executable)
     logger.info("Gateway python version: %s", sys.version.split()[0])
     logger.info("OI_AGENT_BACKEND=%s OI_TTS_BACKEND=%s", os.getenv("OI_AGENT_BACKEND", "pi"), os.getenv("OI_TTS_BACKEND", "piper"))
