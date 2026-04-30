@@ -56,28 +56,35 @@ Oi is an I/O bus for personal agents, not the agent runtime itself.
 ## Repository layout
 
 ```text
-PLAN.md              ← project plan and implementation notes
-src/                 ← v2 implementation
-  oi-gateway/        ← Python gateway: DATP, registry, STT/TTS, resource tree API
-  oi-sim/            ← virtual DATP device for dev and CI
-  oi-cli/            ← CLI wrapper over the gateway API
-  oi-dashboard/      ← monitoring and debug dashboard
-  oi-clients/       ← device client implementations and planning
-oi-project-docs/     ← public specs and architecture docs
+context.md                   ← current repo context and validation notes
+handover.md                  ← latest handoff summary
+BIG_TIDY_UP_PLAN.md          ← broader cleanup plan
+PI_GATEWAY_INTEGRATION_PLAN.md ← Pi gateway integration notes
+src/                         ← v2 implementation
+  oi-gateway/                ← Python gateway: DATP, registry, STT/TTS, resource tree API
+  oi-sim/                    ← virtual DATP device for dev and CI
+  oi-cli/                    ← CLI wrapper over the gateway API
+  oi-dashboard/              ← monitoring and debug dashboard
+  oi-clients/                ← device client implementations and planning
+oi-project-docs/             ← public specs and architecture docs
 ```
 
 ## Documentation
 
 | Document | Purpose |
 |---|---|
-| [`PLAN.md`](PLAN.md) | Project plan and implementation notes |
-| [`TECH_DEBT.md`](TECH_DEBT.md) | Current cleanup and follow-up items |
-| [`ARCH_REVIEW.md`](ARCH_REVIEW.md) | Architecture review notes |
+| [`context.md`](context.md) | Current repo context, findings, and validation notes |
+| [`handover.md`](handover.md) | Latest handoff summary |
+| [`BIG_TIDY_UP_PLAN.md`](BIG_TIDY_UP_PLAN.md) | Broader cleanup and follow-up plan |
+| [`PI_GATEWAY_INTEGRATION_PLAN.md`](PI_GATEWAY_INTEGRATION_PLAN.md) | Pi gateway integration notes |
+| [`OI_GATEWAY_FIRST_PASS_REVIEW.md`](OI_GATEWAY_FIRST_PASS_REVIEW.md) | Gateway review notes |
+| [`OI_SIM_FIRST_PASS_REVIEW.md`](OI_SIM_FIRST_PASS_REVIEW.md) | Simulator review notes |
 | [`start-oi.sh`](start-oi.sh) | Launcher for the gateway plus dashboard (`pi`, `hermes`, and `openclaw` backends) |
 | [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md) | OpenClaw backend setup and local wiring |
 | [`src/oi-gateway/hermes.env.example`](src/oi-gateway/hermes.env.example) | Hermes backend env template |
 | [`src/oi-gateway/openclaw.env.example`](src/oi-gateway/openclaw.env.example) | OpenClaw env template |
 | [`oi-project-docs/docs/specs/`](oi-project-docs/docs/specs/) | Public wire protocol specs |
+| [`oi-project-docs/docs/architecture/`](oi-project-docs/docs/architecture/) | Public architecture docs |
 | [`oi-project-docs/docs/integrations/`](oi-project-docs/docs/integrations/) | Public ecosystem integration docs |
 
 ## Quick start
