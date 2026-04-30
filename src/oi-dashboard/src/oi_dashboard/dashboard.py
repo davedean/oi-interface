@@ -149,13 +149,7 @@ class Dashboard:
 
     async def _index(self, request: web.Request) -> web.Response:
         """Serve the dashboard HTML page."""
-        html_path = STATIC_DIR / "index.html"
-        try:
-            with open(html_path, "r") as f:
-                html = f.read()
-        except FileNotFoundError:
-            html = INLINE_DASHBOARD_HTML
-        return web.Response(text=html, content_type="text/html")
+        return web.Response(text=self._load_index_html(), content_type="text/html")
 
     async def _events_sse(self, request: web.Request) -> web.StreamResponse:
         """Server-Sent Events endpoint for real-time updates."""
@@ -240,6 +234,22 @@ class Dashboard:
             content_type="application/json",
             status=status,
         )
+
+    def _load_index_html(self) -> str:
+        """Return the static dashboard page or the inline fallback."""
+        html_path = STATIC_DIR / "index.html"
+        try:
+            return html_path.read_text()
+        except FileNotFoundError:
+            return INLINE_DASHBOARD_HTML
+
+    def _timestamped_device_event(self, device_id: str, **payload: Any) -> dict[str, Any]:
+        """Build a device event payload with a server timestamp."""
+        return {
+            "device_id": device_id,
+            **payload,
+            "timestamp": self._utc_now_iso(),
+        }
 
     # ------------------------------------------------------------------
     # State Management
@@ -387,11 +397,10 @@ class Dashboard:
         transcript = payload.get("cleaned", "") or payload.get("text", "")
         if transcript:
             self._add_transcript(device_id, transcript)
-            self._broadcast("transcript", {
-                "device_id": device_id,
-                "transcript": transcript,
-                "timestamp": self._utc_now_iso(),
-            })
+            self._broadcast(
+                "transcript",
+                self._timestamped_device_event(device_id, transcript=transcript),
+            )
 
     def on_agent_response(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle agent response event."""
@@ -402,20 +411,24 @@ class Dashboard:
                 if entry.device_id == device_id and entry.transcript == transcript:
                     entry.response = response
                     break
-        self._broadcast("agent_response", {
-            "device_id": device_id,
-            "transcript": transcript,
-            "response": response,
-            "timestamp": self._utc_now_iso(),
-        })
+        self._broadcast(
+            "agent_response",
+            self._timestamped_device_event(
+                device_id,
+                transcript=transcript,
+                response=response,
+            ),
+        )
 
     def on_audio_delivered(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle audio delivered event."""
-        self._broadcast("audio_delivered", {
-            "device_id": device_id,
-            "response_id": payload.get("response_id"),
-            "timestamp": self._utc_now_iso(),
-        })
+        self._broadcast(
+            "audio_delivered",
+            self._timestamped_device_event(
+                device_id,
+                response_id=payload.get("response_id"),
+            ),
+        )
 
 # ------------------------------------------------------------------
 # Module-level singleton
