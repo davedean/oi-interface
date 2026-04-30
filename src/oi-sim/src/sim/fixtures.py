@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 
 from sim.sim import OiSim
 
@@ -25,35 +25,28 @@ from sim.sim import OiSim
 # Loading
 # ------------------------------------------------------------------
 
-def load_fixture(path: str) -> list[dict[str, Any]]:
-    """Load a JSONL fixture file. Each line is a dict.
-
-    Parameters
-    ----------
-    path : str
-        Path to the JSONL file.
-
-    Returns
-    -------
-    list[dict]
-        List of parsed message dicts.
-    """
-    result: list[dict[str, Any]] = []
-    p = Path(path)
-    if not p.exists():
+def _iter_fixture_entries(path: str) -> Iterator[dict[str, Any]]:
+    """Yield parsed non-blank JSONL entries from a fixture file."""
+    fixture_path = Path(path)
+    if not fixture_path.exists():
         raise FileNotFoundError(f"Fixture not found: {path!r}")
-    with p.open() as fh:
-        for lineno, raw in enumerate(fh, 1):
+
+    with fixture_path.open() as handle:
+        for lineno, raw in enumerate(handle, 1):
             line = raw.strip()
             if not line:
                 continue
             try:
-                result.append(json.loads(line))
+                yield json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ValueError(
                     f"Invalid JSON on line {lineno} of {path!r}: {exc}"
                 ) from exc
-    return result
+
+
+def load_fixture(path: str) -> list[dict[str, Any]]:
+    """Load a JSONL fixture file. Each line is a dict."""
+    return list(_iter_fixture_entries(path))
 
 
 # ------------------------------------------------------------------
@@ -121,18 +114,5 @@ async def iter_fixture(
 
     Useful for large fixtures or live replay against a running server.
     """
-    p = Path(fixture_path)
-    if not p.exists():
-        raise FileNotFoundError(f"Fixture not found: {fixture_path!r}")
-
-    with p.open() as fh:
-        for lineno, raw in enumerate(fh, 1):
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"Invalid JSON on line {lineno} of {fixture_path!r}: {exc}"
-                ) from exc
+    for entry in _iter_fixture_entries(fixture_path):
+        yield entry
