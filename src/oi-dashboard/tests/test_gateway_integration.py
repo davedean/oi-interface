@@ -9,8 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from oi_dashboard import DashboardIntegration
 from oi_dashboard.dashboard import Dashboard
-from oi_dashboard.gateway_integration import DashboardIntegration
+from oi_dashboard.gateway_integration import DashboardIntegration as IntegrationModuleExport
 
 
 class MockEventBus:
@@ -44,6 +45,10 @@ async def dashboard():
     yield dash
     await dash.stop()
     await asyncio.sleep(0.05)
+
+
+def test_package_exports_dashboard_integration() -> None:
+    assert DashboardIntegration is IntegrationModuleExport
 
 
 class TestDashboardIntegration:
