@@ -21,6 +21,55 @@ def test_telemetry_collects_core_fields() -> None:
     assert "muted_until" in payload
 
 
+def test_connect_stores_server_info() -> None:
+    client = DatpClient("ws://example", "dev-1", "handheld", {})
+
+    class FakeConnectionClosed(Exception):
+        pass
+
+    class FakeWebSocket:
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+            self.closed = False
+            self._iterated = False
+
+        async def send(self, data: str) -> None:
+            self.sent.append(data)
+
+        async def recv(self) -> str:
+            return '{"type":"hello_ack","payload":{"session_id":"sess-1","server_name":"Oi Gateway"}}'
+
+        async def close(self) -> None:
+            self.closed = True
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.closed or self._iterated:
+                raise StopAsyncIteration
+            self._iterated = True
+            raise FakeConnectionClosed()
+
+    async def fake_connect(*args, **kwargs):
+        return FakeWebSocket()
+
+    import types
+    import sys as _sys
+    old = _sys.modules.get("websockets")
+    _sys.modules["websockets"] = types.SimpleNamespace(connect=fake_connect, ConnectionClosed=FakeConnectionClosed)
+    try:
+        assert asyncio.run(client.connect()) is True
+        assert client.server_info is not None
+        assert client.server_info["payload"]["server_name"] == "Oi Gateway"
+        asyncio.run(client.disconnect())
+    finally:
+        if old is None:
+            del _sys.modules["websockets"]
+        else:
+            _sys.modules["websockets"] = old
+
+
 def test_send_state_report_merges_optional_fields() -> None:
     client = DatpClient("ws://example", "dev-1", "handheld", {})
     captured: list[tuple[str, dict]] = []

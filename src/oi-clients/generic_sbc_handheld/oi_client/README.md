@@ -93,6 +93,13 @@ Recognized but not advertised in capability negotiation:
 
 The client now also sends periodic DATP `state` reports with any discoverable battery/Wi-Fi/memory info.
 
+## Delightful extras
+
+- `Surprise me ✨` home prompt that cycles through whimsical requests
+- `About Gateway` menu card showing `hello_ack` metadata like server name/session/agents
+- secret button-code easter egg for Blob Party mode
+- playful connecting/waiting/response quips on-device
+
 ## Known issues / TODO
 
 - [ ] DatpClient exposes asyncio.Queue for commands — should this be thread safe?

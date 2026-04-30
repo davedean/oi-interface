@@ -21,6 +21,15 @@ from oi_client.renderer import Sdl2Renderer
 from oi_client.audio import HandheldAudio
 from oi_client.capabilities import build_capabilities
 from oi_client.datp import DatpClient
+from oi_client.delight import (
+    SURPRISE_LABEL,
+    SecretTracker,
+    format_gateway_about,
+    pick_celebration,
+    pick_connecting_quip,
+    pick_surprise_prompt,
+    pick_waiting_quip,
+)
 from oi_client.device_control import DeviceController
 from oi_client.telemetry import TelemetryCollector
 import time
@@ -44,6 +53,7 @@ CANNED_PROMPTS = [
     "Status check",
     "Weather today",
     "Mute for 30 minutes",
+    SURPRISE_LABEL,
 ]
 
 
@@ -104,7 +114,11 @@ class HandheldApp:
 
         # Menu
         self._menu_idx = 0
-        self._menu_items = ["Reload", "Reconnect", "Quit"]
+        self._menu_items = ["About Gateway", "Reload", "Reconnect", "Quit"]
+
+        # Delight / easter eggs
+        self._secret_tracker = SecretTracker()
+        self._surprise_counter = 0
 
         # X-button press tracking
         self._x_long_press_seen = False
@@ -149,6 +163,7 @@ class HandheldApp:
 
         # Display version
         self._version = self._get_version()
+        self._celebration_note = ""
 
     def _get_version(self) -> str:
         """Get git commit hash for display."""
@@ -220,6 +235,7 @@ class HandheldApp:
             self._online = True
             self._ui_mode = UIMode.READY
             self._card.body = "Select a prompt"
+            self._celebration_note = "✨ Gateway handshake complete"
         else:
             self._online = False
             self._ui_mode = UIMode.ERROR
@@ -371,7 +387,7 @@ class HandheldApp:
         # Short-press A should fire on release, not press, to avoid accidental sends.
         if ev.name == "a" and ev.action == "released" and self._ui_mode in (UIMode.HOME, UIMode.READY):
             if self._ui_mode != UIMode.RECORDING:
-                prompt = CANNED_PROMPTS[self._prompt_idx]
+                prompt = self._selected_prompt()
                 await self._send_prompt(prompt)
             return
 
@@ -388,6 +404,13 @@ class HandheldApp:
             return
 
         if ev.action != "pressed":
+            return
+
+        if self._ui_mode in (UIMode.HOME, UIMode.READY) and self._secret_tracker.push(ev.name):
+            self._card.title = "Blob Party"
+            self._card.body = "Secret code accepted.\n\nThe handheld feels 12% more magical now."
+            self._ui_mode = UIMode.CARD
+            self._celebration_note = "🎈 Party mode ready"
             return
 
         if self._ui_mode == UIMode.MENU:
@@ -449,7 +472,12 @@ class HandheldApp:
     async def _handle_menu(self, name: str) -> None:
         if name == "a":
             item = self._menu_items[self._menu_idx]
-            if item == "Reload":
+            if item == "About Gateway":
+                self._card.title = "Gateway"
+                self._card.body = "\n".join(format_gateway_about(self.datp.server_info if self.datp else None))
+                self._card_scroll = 0
+                self._ui_mode = UIMode.CARD
+            elif item == "Reload":
                 await self._reload_process()
             elif item == "Quit":
                 logger.warning("Exiting due to menu Quit")
@@ -474,6 +502,14 @@ class HandheldApp:
         elif name == "down":
             self._menu_idx = (self._menu_idx + 1) % len(self._menu_items)
 
+    def _selected_prompt(self) -> str:
+        choice = CANNED_PROMPTS[self._prompt_idx]
+        if choice == SURPRISE_LABEL:
+            prompt = pick_surprise_prompt(self._surprise_counter)
+            self._surprise_counter += 1
+            return prompt
+        return choice
+
     async def _send_prompt(self, text: str) -> None:
         if self._device_control.is_muted():
             self._card.title = "Muted"
@@ -484,11 +520,12 @@ class HandheldApp:
             self._ui_mode = UIMode.OFFLINE
             return
         # Clear previous response before sending new prompt
-        self._card = CardData(title="Oi", body="")
+        self._card = CardData(title="Oi", body=pick_waiting_quip(self._spinner_frame))
         self._ui_mode = UIMode.WAITING
         # Optimistic local character update so UI reflects waiting immediately.
         self._character_label = "Waiting"
         self._character_animation = "pulse"
+        self._celebration_note = ""
         try:
             await self.datp.send_text_prompt(text)
         except Exception as exc:
@@ -524,7 +561,12 @@ class HandheldApp:
 
     def _handle_display_show_card(self, _op: str, args: dict) -> bool:
         self._card.title = args.get("title", "Response")
-        self._card.body = args.get("body", "")
+        body = args.get("body", "")
+        if self._card.title.lower() == "response":
+            self._celebration_note = pick_celebration(len(body))
+            if self._celebration_note:
+                body = body + ("\n\n" if body else "") + self._celebration_note
+        self._card.body = body
         self._card_scroll = 0
         self._ui_mode = UIMode.CARD
         return True
@@ -548,6 +590,9 @@ class HandheldApp:
                 self._card_scroll = 0
             self._card.body = (self._card.body or "") + text_delta
         if is_final:
+            self._celebration_note = pick_celebration(len(self._card.body))
+            if self._celebration_note and self._celebration_note not in self._card.body:
+                self._card.body = (self._card.body or "") + "\n\n" + self._celebration_note
             self._card_scroll = 0
             self._ui_mode = UIMode.CARD
         elif self._ui_mode == UIMode.WAITING and text_delta:
@@ -722,7 +767,7 @@ class HandheldApp:
 
         # Main content area based on mode
         if self._ui_mode == UIMode.CONNECTING:
-            self.renderer.draw_card("Connecting", ["Attempting to reach oi-gateway..."], 0, ascii_bg_lines=blob)
+            self.renderer.draw_card("Connecting", [pick_connecting_quip(self._spinner_frame), "Attempting to reach oi-gateway..."], 0, ascii_bg_lines=blob)
             self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
 
         elif self._ui_mode == UIMode.READY or self._ui_mode == UIMode.HOME:
@@ -731,11 +776,13 @@ class HandheldApp:
                 self.renderer.draw_card("Muted", lines, 0, ascii_bg_lines=blob)
             else:
                 lines = ["Select a prompt:"] + [f"  {'>' if i == self._prompt_idx else ' '} {p}" for i, p in enumerate(CANNED_PROMPTS)]
+                if self._celebration_note:
+                    lines += ["", self._celebration_note]
                 self.renderer.draw_card("Home", lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.WAITING:
             # While waiting, show live progress and keep newest entries on screen.
-            waiting_lines = ["Sending to gateway..."]
+            waiting_lines = [pick_waiting_quip(self._spinner_frame), "Sending to gateway..."]
             if self._card.body:
                 body_lines = [ln for ln in self._card.body.split("\n") if ln.strip()]
                 if body_lines:

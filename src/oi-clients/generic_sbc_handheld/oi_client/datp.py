@@ -50,6 +50,7 @@ class DatpClient:
         self._connected = False
         self._state_machine = StateMachine(State.READY)
         self._session_id: str | None = None
+        self._server_info: dict[str, Any] | None = None
         self._listen_task: asyncio.Task | None = None
         self._received_commands: list[dict] = []
 
@@ -63,6 +64,10 @@ class DatpClient:
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def server_info(self) -> dict[str, Any] | None:
+        return self._server_info
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -106,6 +111,7 @@ class DatpClient:
                 await self.disconnect()
                 return False
             self._session_id = resp.get("payload", {}).get("session_id")
+            self._server_info = resp
         except asyncio.TimeoutError:
             await self.disconnect()
             return False
@@ -134,6 +140,7 @@ class DatpClient:
     async def reconnect(self) -> bool:
         await self.disconnect()
         self._session_id = None
+        self._server_info = None
         self._received_commands.clear()
         self._state_machine = StateMachine(State.READY)
         await asyncio.sleep(self.reconnect_backoff)
