@@ -188,7 +188,7 @@ class Dashboard:
             return
         try:
             payload = json.dumps({"type": event_type, "data": data})
-            await response.write(f"event: {event_type}\ndata: {payload}\n\n".encode())
+            await response.write(f"data: {payload}\n\n".encode())
         except Exception as e:
             logger.debug("SSE send failed: %s", e)
 
@@ -209,7 +209,7 @@ class Dashboard:
     async def _api_transcripts(self, request: web.Request) -> web.Response:
         """Return cached transcript entries."""
         return self._json_response({
-            "transcripts": self._transcripts[-50:],  # Last 50
+            "transcripts": self._transcript_payloads(self._transcripts[-50:]),  # Last 50
             "count": len(self._transcripts),
         })
 
@@ -262,7 +262,7 @@ class Dashboard:
                 dev_id: self._device_payload(dev)
                 for dev_id, dev in self._devices.items()
             },
-            "transcripts": self._transcripts[-20:],
+            "transcripts": self._transcript_payloads(self._transcripts[-20:]),
             "timestamp": self._utc_now_iso(),
         }
 
@@ -295,6 +295,20 @@ class Dashboard:
             "muted_until": device.muted_until,
             "audio_cache_bytes": device.audio_cache_bytes,
         }
+
+    def _transcript_payload(self, entry: TranscriptEntry) -> dict[str, str]:
+        """Serialize a transcript entry for HTTP/SSE payloads."""
+        return {
+            "timestamp": entry.timestamp,
+            "device_id": entry.device_id,
+            "transcript": entry.transcript,
+            "response": entry.response,
+            "stream_id": entry.stream_id,
+        }
+
+    def _transcript_payloads(self, entries: list[TranscriptEntry]) -> list[dict[str, str]]:
+        """Serialize a list of transcript entries."""
+        return [self._transcript_payload(entry) for entry in entries]
 
     def _utc_now_iso(self) -> str:
         """Return the current UTC time as an ISO-8601 string."""

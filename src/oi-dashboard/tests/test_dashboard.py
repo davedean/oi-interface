@@ -83,6 +83,17 @@ class TestTranscriptsEndpoint:
         assert "transcripts" in data
         assert "count" in data
 
+    async def test_transcripts_returns_serializable_entries(self, dashboard):
+        """Transcripts endpoint should JSON-encode cached transcript entries."""
+        dashboard.on_transcript("test-device", {"cleaned": "Hello world"})
+
+        status, data = await retry_request(lambda: fetch_json(dashboard, "/api/transcripts"))
+
+        assert status == 200
+        assert data["count"] == 1
+        assert data["transcripts"][0]["device_id"] == "test-device"
+        assert data["transcripts"][0]["transcript"] == "Hello world"
+
 
 class TestIndexEndpoint:
     async def test_index_returns_html(self, dashboard):
@@ -102,8 +113,8 @@ class TestIndexEndpoint:
 
 
 class TestSSEEndpoint:
-    async def test_sse_returns_init_event(self, dashboard):
-        """SSE endpoint should return initial state on connect."""
+    async def test_sse_returns_init_message(self, dashboard):
+        """SSE endpoint should emit an init payload as a default message event."""
         async def make_request():
             async with aiohttp.ClientSession() as session:
                 async with session.get(dashboard_url(dashboard, "/events")) as resp:
@@ -113,12 +124,13 @@ class TestSSEEndpoint:
                     body = b""
                     async for chunk in resp.content.iter_any():
                         body += chunk
-                        if b"event: init" in body:
+                        if b"\n\n" in body:
                             break
                     return body
 
         body = await retry_request(make_request, max_attempts=5)
-        assert b"event: init" in body
+        assert b"data: " in body
+        assert b"event:" not in body
         assert b'"type":"init"' in body or b'"devices"' in body
 
 
