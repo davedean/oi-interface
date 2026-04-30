@@ -4,10 +4,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -19,6 +18,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "localhost"
 DEFAULT_API_PORT = 8788
 DEFAULT_DASHBOARD_PORT = 8789
+STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 
 
 @dataclass
@@ -136,21 +136,18 @@ class Dashboard:
 
     def _setup_routes(self) -> None:
         """Register HTTP routes."""
-        from pathlib import Path
-        static_dir = Path(__file__).parent.parent.parent / "static"
         self._app.router.add_get("/", self._index)
         self._app.router.add_get("/events", self._events_sse)
         self._app.router.add_get("/api/devices", self._api_devices)
         self._app.router.add_get("/api/devices/{device_id}", self._api_device_info)
         self._app.router.add_get("/api/transcripts", self._api_transcripts)
         self._app.router.add_get("/api/health", self._api_health)
-        if static_dir.exists():
-            self._app.router.add_static("/static", str(static_dir))
+        if STATIC_DIR.exists():
+            self._app.router.add_static("/static", str(STATIC_DIR))
 
     async def _index(self, request: web.Request) -> web.Response:
         """Serve the dashboard HTML page."""
-        from pathlib import Path
-        html_path = Path(__file__).parent.parent.parent / "static" / "index.html"
+        html_path = STATIC_DIR / "index.html"
         try:
             with open(html_path, "r") as f:
                 html = f.read()
@@ -250,22 +247,11 @@ class Dashboard:
         """Get current state for initial SSE connection."""
         return {
             "devices": {
-                dev_id: {
-                    "device_id": dev.device_id,
-                    "device_type": dev.device_type,
-                    "session_id": dev.session_id,
-                    "online": dev.online,
-                    "connected_at": dev.connected_at,
-                    "last_seen": dev.last_seen,
-                    "state": dev.state,
-                    "capabilities": dev.capabilities,
-                    "muted_until": dev.muted_until,
-                    "audio_cache_bytes": dev.audio_cache_bytes,
-                }
+                dev_id: self._device_payload(dev)
                 for dev_id, dev in self._devices.items()
             },
             "transcripts": self._transcripts[-20:],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": self._utc_now_iso(),
         }
 
     def _update_device_state(self, device_id: str, info: dict[str, Any]) -> None:
@@ -283,10 +269,39 @@ class Dashboard:
         dev.audio_cache_bytes = info.get("audio_cache_bytes", 0)
         self._devices[device_id] = dev
 
+    def _device_payload(self, device: DeviceState) -> dict[str, Any]:
+        """Serialize a device state for HTTP/SSE payloads."""
+        return {
+            "device_id": device.device_id,
+            "device_type": device.device_type,
+            "session_id": device.session_id,
+            "online": device.online,
+            "connected_at": device.connected_at,
+            "last_seen": device.last_seen,
+            "state": device.state,
+            "capabilities": device.capabilities,
+            "muted_until": device.muted_until,
+            "audio_cache_bytes": device.audio_cache_bytes,
+        }
+
+    def _utc_now_iso(self) -> str:
+        """Return the current UTC time as an ISO-8601 string."""
+        return datetime.now(timezone.utc).isoformat()
+
     def _mark_device_offline(self, device_id: str) -> None:
         """Mark a device as offline."""
         if device_id in self._devices:
             self._devices[device_id].online = False
+
+    def _sync_polled_device(self, device_id: str, info: dict[str, Any]) -> None:
+        """Merge a polled device payload and emit online/offline transitions."""
+        was_online = self._devices.get(device_id, DeviceState()).online
+        is_online = info.get("online", True)
+        self._update_device_state(device_id, info)
+        if not was_online and is_online:
+            self._broadcast("device_online", info)
+        elif was_online and not is_online:
+            self._broadcast("device_offline", {"device_id": device_id})
 
     def _add_transcript(self, device_id: str, transcript: str, response: str = "", stream_id: str = "") -> None:
         """Add a transcript entry."""
@@ -320,34 +335,27 @@ class Dashboard:
         """Poll gateway API for current state."""
         try:
             async with aiohttp.ClientSession() as session:
-                # Get device list
                 async with session.get(
                     f"{self._api_base}/api/devices",
-                    timeout=aiohttp.ClientTimeout(total=5)
+                    timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        devices = data.get("devices", [])
-                        changed = False
-                        for dev_info in devices:
-                            dev_id = dev_info.get("device_id", "")
-                            if dev_id:
-                                old_online = self._devices.get(dev_id, DeviceState()).online
-                                self._update_device_state(dev_id, dev_info)
-                                if not old_online and dev_info.get("online"):
-                                    changed = True
-                                    self._broadcast("device_online", dev_info)
-                                elif old_online and not dev_info.get("online"):
-                                    changed = True
-                                    self._broadcast("device_offline", {"device_id": dev_id})
+                    if resp.status != 200:
+                        return
 
-                        # Mark devices not in response as offline
-                        current_ids = {d.get("device_id") for d in devices}
-                        for dev_id in list(self._devices.keys()):
-                            if dev_id and dev_id not in current_ids:
-                                if self._devices[dev_id].online:
-                                    self._devices[dev_id].online = False
-                                    self._broadcast("device_offline", {"device_id": dev_id})
+                    data = await resp.json()
+                    devices = data.get("devices", [])
+                    current_ids = set()
+                    for dev_info in devices:
+                        dev_id = dev_info.get("device_id", "")
+                        if not dev_id:
+                            continue
+                        current_ids.add(dev_id)
+                        self._sync_polled_device(dev_id, dev_info)
+
+                    for dev_id in list(self._devices):
+                        if dev_id and dev_id not in current_ids and self._devices[dev_id].online:
+                            self._devices[dev_id].online = False
+                            self._broadcast("device_offline", {"device_id": dev_id})
 
         except aiohttp.ClientError as e:
             logger.debug("Poll failed (gateway may be down): %s", e)
@@ -380,15 +388,13 @@ class Dashboard:
             self._broadcast("transcript", {
                 "device_id": device_id,
                 "transcript": transcript,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": self._utc_now_iso(),
             })
 
     def on_agent_response(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle agent response event."""
-        # Update the most recent transcript with the response
         transcript = payload.get("transcript", "")
         response = payload.get("response_text", "")
-        stream_id = payload.get("stream_id", "")
         if transcript and self._transcripts:
             for entry in reversed(self._transcripts):
                 if entry.device_id == device_id and entry.transcript == transcript:
@@ -398,18 +404,15 @@ class Dashboard:
             "device_id": device_id,
             "transcript": transcript,
             "response": response,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": self._utc_now_iso(),
         })
 
     def on_audio_delivered(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle audio delivered event."""
-        if device_id in self._devices:
-            # Update audio cache state if reported
-            pass
         self._broadcast("audio_delivered", {
             "device_id": device_id,
             "response_id": payload.get("response_id"),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": self._utc_now_iso(),
         })
 
     # ------------------------------------------------------------------
