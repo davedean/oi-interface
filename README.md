@@ -1,7 +1,5 @@
 # Oi
 
-> One mind. Many bodies. Human in control.
-
 Oi is a local-first input/output layer for personal agents. It connects embodied devices, a gateway, and a user-owned agent runtime so you can interact with the same assistant from a desk puck, phone, watch, dashboard, or terminal.
 
 ## What it does
