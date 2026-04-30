@@ -12,7 +12,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_HOST="anbernic"
-TARGET_ROOT="/storage/roms/ports"
+DEFAULT_APP_ROOT="/storage/roms/ports"
+DEFAULT_LAUNCHER_ROOT="${DEFAULT_APP_ROOT}"
+APP_ROOT="${DEFAULT_APP_ROOT}"
+LAUNCHER_ROOT="${DEFAULT_LAUNCHER_ROOT}"
+APP_ROOT_SET=false
+LAUNCHER_ROOT_SET=false
+PORTMASTER_ROOT=""
+LAYOUT_PROFILE="manual"
 APP_DIR_NAME="Oi"
 LAUNCHER_NAME="Oi.sh"
 HOST="${DEFAULT_HOST}"
@@ -26,10 +33,12 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Options:
-  --host HOST         SSH host to deploy to (default: ${DEFAULT_HOST})
-  --target-root PATH  Remote ports root (default: ${TARGET_ROOT})
-  --app-dir NAME      Remote app directory name under target root (default: ${APP_DIR_NAME})
-  --launcher NAME     Remote launcher filename in target root (default: ${LAUNCHER_NAME})
+  --host HOST           SSH host to deploy to (default: ${DEFAULT_HOST})
+  --target-root PATH    Remote ports root for both app + launcher (legacy)
+  --app-root PATH       Remote app payload root (default: auto / ${DEFAULT_APP_ROOT})
+  --launcher-root PATH  Remote launcher root (default: auto / ${DEFAULT_LAUNCHER_ROOT})
+  --app-dir NAME        Remote app directory name under app root (default: ${APP_DIR_NAME})
+  --launcher NAME       Remote launcher filename in launcher root (default: ${LAUNCHER_NAME})
   --dry-run           Print actions without executing them
   --backup            Backup existing device files before deployment
   --no-launcher       Skip deploying launcher script
@@ -47,7 +56,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --target-root)
             [[ $# -ge 2 ]] || { echo "ERROR: --target-root requires a value" >&2; exit 1; }
-            TARGET_ROOT="$2"
+            APP_ROOT="$2"
+            LAUNCHER_ROOT="$2"
+            APP_ROOT_SET=true
+            LAUNCHER_ROOT_SET=true
+            shift 2
+            ;;
+        --app-root)
+            [[ $# -ge 2 ]] || { echo "ERROR: --app-root requires a value" >&2; exit 1; }
+            APP_ROOT="$2"
+            APP_ROOT_SET=true
+            shift 2
+            ;;
+        --launcher-root)
+            [[ $# -ge 2 ]] || { echo "ERROR: --launcher-root requires a value" >&2; exit 1; }
+            LAUNCHER_ROOT="$2"
+            LAUNCHER_ROOT_SET=true
             shift 2
             ;;
         --app-dir)
@@ -92,10 +116,68 @@ SOURCE_ROOT="${SCRIPT_DIR}"
 SOURCE_CLIENT_DIR="${SOURCE_ROOT}/oi_client"
 SOURCE_LAUNCHER_TEMPLATE="${SOURCE_ROOT}/Oi.sh"
 SOURCE_CAPABILITY_PROFILE="${SOURCE_ROOT}/capability-profile.json"
-TARGET_DIR="${TARGET_ROOT}/${APP_DIR_NAME}"
-TARGET_CLIENT_DIR="${TARGET_DIR}/oi_client"
-TARGET_LAUNCHER="${TARGET_ROOT}/${LAUNCHER_NAME}"
 DEFAULT_DEVICE_ID="$(printf '%s' "${APP_DIR_NAME}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')-001"
+
+compute_target_paths() {
+    TARGET_DIR="${APP_ROOT}/${APP_DIR_NAME}"
+    TARGET_CLIENT_DIR="${TARGET_DIR}/oi_client"
+    TARGET_LAUNCHER="${LAUNCHER_ROOT}/${LAUNCHER_NAME}"
+}
+
+have_remote_rsync() {
+    if [[ "$DRY_RUN" == true ]]; then
+        return 0
+    fi
+    ssh "$HOST" "command -v rsync >/dev/null 2>&1"
+}
+
+resolve_remote_layout() {
+    if [[ "$APP_ROOT_SET" == true && "$LAUNCHER_ROOT_SET" == true ]]; then
+        compute_target_paths
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        compute_target_paths
+        return 0
+    fi
+
+    local detected detected_app_root detected_launcher_root requested_app_root requested_launcher_root
+    requested_app_root="$APP_ROOT"
+    requested_launcher_root="$LAUNCHER_ROOT"
+
+    detected="$(ssh "$HOST" '
+        if [ -d /mnt/mmc/MUOS/PortMaster ] && [ -d /mnt/mmc/ports ] && [ -d /mnt/mmc/ROMS/PORTS ]; then
+            printf "APP_ROOT=/mnt/mmc/ports\nLAUNCHER_ROOT=/mnt/mmc/ROMS/PORTS\nPORTMASTER_ROOT=/mnt/mmc/MUOS/PortMaster\nLAYOUT_PROFILE=muOS\n"
+        elif [ -d /storage/roms/ports/PortMaster ]; then
+            printf "APP_ROOT=/storage/roms/ports\nLAUNCHER_ROOT=/storage/roms/ports\nPORTMASTER_ROOT=/storage/roms/ports/PortMaster\nLAYOUT_PROFILE=amberelec\n"
+        elif [ -d /roms/ports/PortMaster ]; then
+            printf "APP_ROOT=/roms/ports\nLAUNCHER_ROOT=/roms/ports\nPORTMASTER_ROOT=/roms/ports/PortMaster\nLAYOUT_PROFILE=roms-ports\n"
+        else
+            exit 1
+        fi
+    ' 2>/dev/null)" || {
+        echo "ERROR: Could not detect remote handheld layout. Use --app-root and --launcher-root." >&2
+        exit 1
+    }
+
+    eval "$detected"
+    detected_app_root="$APP_ROOT"
+    detected_launcher_root="$LAUNCHER_ROOT"
+
+    if [[ "$APP_ROOT_SET" == true ]]; then
+        APP_ROOT="$requested_app_root"
+    else
+        APP_ROOT="$detected_app_root"
+    fi
+    if [[ "$LAUNCHER_ROOT_SET" == true ]]; then
+        LAUNCHER_ROOT="$requested_launcher_root"
+    else
+        LAUNCHER_ROOT="$detected_launcher_root"
+    fi
+
+    compute_target_paths
+}
 
 run_ssh() {
     local command="$1"
@@ -124,13 +206,6 @@ generate_launcher() {
         -e "s#__OI_APP_DIR__#${APP_DIR_NAME}#g" \
         -e "s#__OI_DEFAULT_DEVICE_ID__#${DEFAULT_DEVICE_ID}#g" \
         "$SOURCE_LAUNCHER_TEMPLATE" > "$out"
-}
-
-have_remote_rsync() {
-    if [[ "$DRY_RUN" == true ]]; then
-        return 0
-    fi
-    ssh "$HOST" "command -v rsync >/dev/null 2>&1"
 }
 
 sync_client_with_rsync() {
@@ -198,9 +273,12 @@ verify_exists() {
     fi
 }
 
+compute_target_paths
+
 echo "=== Oi handheld deployment ==="
 echo "Target host:      ${HOST}"
-echo "Target root:      ${TARGET_ROOT}"
+echo "App root:         ${APP_ROOT}"
+echo "Launcher root:    ${LAUNCHER_ROOT}"
 echo "App dir:          ${APP_DIR_NAME}"
 echo "Target dir:       ${TARGET_DIR}"
 echo "Launcher:         ${LAUNCHER_NAME}"
@@ -224,7 +302,19 @@ else
     fi
 fi
 
-run_ssh "mkdir -p '${TARGET_DIR}' '${TARGET_CLIENT_DIR}' '${TARGET_CLIENT_DIR}/lib'"
+resolve_remote_layout
+
+echo "Resolved layout:  ${LAYOUT_PROFILE}"
+if [[ -n "$PORTMASTER_ROOT" ]]; then
+    echo "PortMaster root:  ${PORTMASTER_ROOT}"
+fi
+echo "App root:         ${APP_ROOT}"
+echo "Launcher root:    ${LAUNCHER_ROOT}"
+echo "Target dir:       ${TARGET_DIR}"
+echo "Launcher path:    ${TARGET_LAUNCHER}"
+echo ""
+
+run_ssh "mkdir -p '${TARGET_DIR}' '${TARGET_CLIENT_DIR}' '${TARGET_CLIENT_DIR}/lib' '${LAUNCHER_ROOT}'"
 
 if [[ "$DO_BACKUP" == true ]]; then
     timestamp="$(date +%Y%m%d_%H%M%S)"
@@ -270,8 +360,15 @@ fi
 
 echo ""
 echo "=== Deployment complete ==="
-echo "Launch on device:"
-echo "  ssh ${HOST} 'cd ${TARGET_DIR} && PYTHONPATH=${TARGET_ROOT}/PortMaster/exlibs:${TARGET_CLIENT_DIR}/lib:${TARGET_DIR} PYSDL2_DLL_PATH=/usr/lib python3 -m oi_client'"
+echo "Launch on device via launcher:"
+echo "  ${TARGET_LAUNCHER}"
+echo ""
+echo "Manual Python run on device (after setting PortMaster PYTHONPATH):"
+if [[ -n "$PORTMASTER_ROOT" ]]; then
+    echo "  ssh ${HOST} 'cd ${TARGET_DIR} && PYTHONPATH=${PORTMASTER_ROOT}/exlibs:${TARGET_CLIENT_DIR}/lib:${TARGET_DIR} PYSDL2_DLL_PATH=/usr/lib python3 -m oi_client'"
+else
+    echo "  ssh ${HOST} 'cd ${TARGET_DIR} && PYTHONPATH=<portmaster-exlibs>:${TARGET_CLIENT_DIR}/lib:${TARGET_DIR} PYSDL2_DLL_PATH=/usr/lib python3 -m oi_client'"
+fi
 echo ""
 echo "Log file on device:"
 echo "  ${TARGET_CLIENT_DIR}/oi.log"
