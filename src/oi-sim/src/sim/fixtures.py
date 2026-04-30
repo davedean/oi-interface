@@ -5,7 +5,7 @@ one DATP message (typically sent by the gateway to the device during a
 recorded session).
 
 Format (gateway → device line):
-  {"type": "command", "payload": {"op": "display.show_status", "args": {"state": "thinking"}}}
+  {"v": "datp", "type": "command", "id": "cmd-1", "device_id": "oi-sim-001", "ts": "2026-04-30T00:00:00.000Z", "payload": {"op": "display.show_status", "args": {"state": "thinking"}}}
 
 Format (event line, for timing markers):
   {"delay_ms": 500}   -- sleep before next line
@@ -57,13 +57,13 @@ async def replay_fixture(
     sim: OiSim,
     fixture_path: str,
     *,
-    send_to_device: bool = True,
+    send_to_device: bool = False,
 ) -> list[dict[str, Any]]:
     """Play back a fixture file against a connected ``OiSim``.
 
-    Sends each message in the fixture to the device over its WebSocket
-    connection (for fixtures captured from a real gateway session) and
-    records the device's responses.
+    By default, fixture messages are injected directly into the simulator's
+    message processor so command handling, state updates, and local ACKs run
+    without requiring gateway support for replay.
 
     Parameters
     ----------
@@ -72,9 +72,10 @@ async def replay_fixture(
     fixture_path : str
         Path to the JSONL fixture file.
     send_to_device : bool
-        If True, forward fixture lines to the device's socket.
-        Set False to inject directly into the device's message processor
-        (no live WebSocket needed; acks are still sent if connected).
+        If True, write fixture lines to the simulator's socket as raw DATP
+        messages. This is mainly useful with fake sockets in tests.
+        Leave False to inject directly into the device's message processor
+        (the practical default for real replay).
 
     Returns
     -------
@@ -94,12 +95,8 @@ async def replay_fixture(
             continue
 
         if send_to_device:
-            # Forward to device's socket (simulate gateway sending to device).
-            # The listen loop's _process_message will handle it.
             await sim._ws.send(json.dumps(entry))
         else:
-            # Directly inject into the device's message processor so
-            # command processing, state machine, and ack sending all run.
             await sim._process_message(entry)
 
         received.append(entry)

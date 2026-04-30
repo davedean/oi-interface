@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -57,14 +56,14 @@ async def test_replay_fixture_requires_connected_sim(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_replay_fixture_direct_injection_updates_state_and_sends_ack(fixture_file: Path):
+async def test_replay_fixture_default_direct_injection_updates_state_and_sends_ack(fixture_file: Path):
     sim = OiSim()
     sim._connected = True
     sim._ws = FakeWebSocket()
     sim._session_id = "sess-1"
     sim._state_machine = sim._state_machine.__class__(State.THINKING)
 
-    received = await replay_fixture(sim, str(fixture_file), send_to_device=False)
+    received = await replay_fixture(sim, str(fixture_file))
 
     assert len(received) == 2
     assert sim.display_state == "thinking"

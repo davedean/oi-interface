@@ -4,17 +4,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
+
 import pytest
-import websockets
 
 from datp.server import DATPServer
 
 from sim.state import InvalidTransition, State, StateMachine
 from sim.sim import OiSim
-from sim.fixtures import load_fixture
+from sim.fixtures import load_fixture, replay_fixture
 
 
 # ------------------------------------------------------------------
@@ -434,6 +433,28 @@ async def test_received_messages_property(datp_server):
 # ------------------------------------------------------------------
 # Fixtures module tests
 # ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_replay_fixture_default_injects_commands_into_connected_sim(datp_server, tmp_path: Path):
+    """replay_fixture should use direct injection by default for live sims."""
+    fixture = tmp_path / "replay.jsonl"
+    fixture.write_text(
+        '{"type":"command","id":"cmd-1","payload":{"op":"display.show_status","args":{"state":"thinking","label":"Replay"}}}\n',
+        encoding="utf-8",
+    )
+    device = OiSim(gateway=f"ws://localhost:{datp_server.port}/datp", device_id="oi-sim-replay")
+    await device.connect()
+
+    try:
+        received = await replay_fixture(device, str(fixture))
+
+        assert received[0]["payload"]["op"] == "display.show_status"
+        assert device.display_state == "thinking"
+        assert device.display_label == "Replay"
+        assert device.received_commands[0]["op"] == "display.show_status"
+    finally:
+        await device.disconnect()
+
 
 class TestFixtures:
     def test_load_fixture_valid(self, tmp_path):
