@@ -2,11 +2,6 @@
 
 This folder targets Linux handhelds (RG351P / AmberELEC) using SDL2 + PySDL2.
 
-## Scope
-
-Applies to everything under:
-- `src/oi-clients/generic_sbc_handheld/`
-
 ## Critical SDL2 setup order (do not skip)
 
 1. Set `PYSDL2_DLL_PATH` before importing `sdl2`.

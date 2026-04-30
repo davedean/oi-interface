@@ -22,9 +22,7 @@ Use `help` in the REPL to inspect supported simulated events.
 
 ## Development (rough)
 
-- Prefer small behavior changes with matching tests in `tests/`.
 - If command semantics change, keep REPL help text and tests in sync.
-- Preserve default local gateway URL unless explicitly changing integration defaults.
 
 - TODO: add protocol versioning notes if/when the simulator supports multiple profiles.
 

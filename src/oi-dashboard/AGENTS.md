@@ -1,24 +1,8 @@
 # AGENTS.md — oi-dashboard
 
-## Scope
-
-Applies to everything under:
-- `src/oi-dashboard/`
-
 ## Project conventions
 
-- Use project names exactly: `oi-dashboard`, `oi-gateway`.
 - Keep the dashboard lightweight: `aiohttp` backend + static HTML (`static/index.html`).
-- Prefer small, targeted changes over UI/framework rewrites.
-
-## Runtime defaults
-
-Defined in `src/oi_dashboard/dashboard.py`:
-- host: `localhost`
-- `oi-gateway` API port: `8788`
-- `oi-dashboard` port: `8789`
-
-Keep docs and CLI help aligned with these defaults unless intentionally changed.
 
 ## API/SSE surface
 
