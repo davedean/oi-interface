@@ -1,7 +1,10 @@
 #!/bin/bash
-# Oi — Oi device runtime for Linux SBC handhelds
-# Port launcher for AmberELEC / EmulationStation
-# Place as /storage/roms/ports/Oi.sh
+# Generic Oi device runtime launcher for Linux SBC handhelds.
+#
+# This file is a template. deploy.sh fills in the app directory
+# and default device id before copying it to the device.
+#
+# Example deployed path: /storage/roms/ports/Oi.sh
 
 # Find PortMaster control scripts
 if [ -d "/storage/roms/ports/PortMaster/" ]; then
@@ -16,7 +19,7 @@ source $controlfolder/control.txt
 
 get_controls
 
-GAMEDIR="/$directory/ports/Oi"
+GAMEDIR="/$directory/ports/__OI_APP_DIR__"
 mkdir -p "$GAMEDIR"
 mkdir -p "$GAMEDIR/oi_client/lib"
 cd "$GAMEDIR"
@@ -44,7 +47,7 @@ $ESUDO pkill -f "python3.*oi_client" 2>/dev/null || true
 
 # Create default config if missing
 if [ ! -f "$GAMEDIR/config.json" ]; then
-  echo '{"gateway_url": "ws://gateway.local:8788/datp", "device_id": "rg351p-001", "device_type": "sbc-handheld"}' > "$GAMEDIR/config.json"
+  echo '{"gateway_url": "ws://gateway.local:8788/datp", "device_id": "__OI_DEFAULT_DEVICE_ID__", "device_type": "sbc-handheld"}' > "$GAMEDIR/config.json"
 fi
 
 # Run

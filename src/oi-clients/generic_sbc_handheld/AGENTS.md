@@ -118,6 +118,8 @@ Useful options:
 - `--app-dir Oi`
 - `--launcher Oi.sh`
 
+The launcher is templated at deploy time, so changing `--app-dir` also updates the launcher's `GAMEDIR` and default `device_id`.
+
 ## Logging location on device
 
 - `/storage/roms/ports/Oi/oi_client/oi.log`

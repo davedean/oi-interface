@@ -56,6 +56,7 @@ Think of this as an **embodied handheld Oi terminal**:
 - `capability-profile.json` — draft capability shape for gateway registration
 - `runtime_sketch.py` — illustrative Linux user-space runtime skeleton
 - `deploy.sh` — SSH deploy script for PortMaster-style handheld installs
+- `Oi.sh` — launcher template; `deploy.sh` fills in app-dir-specific values
 
 ## Deploying to a handheld
 
@@ -72,6 +73,8 @@ Useful options:
 ./src/oi-clients/generic_sbc_handheld/deploy.sh --backup --host anbernic
 ./src/oi-clients/generic_sbc_handheld/deploy.sh --host anbernic --app-dir Oi --launcher Oi.sh
 ```
+
+When you change `--app-dir`, the deployed launcher is templated to point at that app directory and gets a matching default `device_id`.
 
 ## Key implementation insight from `oi-sim`
 

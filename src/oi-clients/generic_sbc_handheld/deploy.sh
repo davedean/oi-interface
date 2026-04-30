@@ -90,11 +90,12 @@ done
 
 SOURCE_ROOT="${SCRIPT_DIR}"
 SOURCE_CLIENT_DIR="${SOURCE_ROOT}/oi_client"
-SOURCE_LAUNCHER="${SOURCE_ROOT}/Oi.sh"
+SOURCE_LAUNCHER_TEMPLATE="${SOURCE_ROOT}/Oi.sh"
 SOURCE_CAPABILITY_PROFILE="${SOURCE_ROOT}/capability-profile.json"
 TARGET_DIR="${TARGET_ROOT}/${APP_DIR_NAME}"
 TARGET_CLIENT_DIR="${TARGET_DIR}/oi_client"
 TARGET_LAUNCHER="${TARGET_ROOT}/${LAUNCHER_NAME}"
+DEFAULT_DEVICE_ID="$(printf '%s' "${APP_DIR_NAME}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')-001"
 
 run_ssh() {
     local command="$1"
@@ -115,6 +116,14 @@ copy_file() {
         echo "[EXEC] scp ${src} ${HOST}:${dst}"
         scp "$src" "$HOST:$dst"
     fi
+}
+
+generate_launcher() {
+    local out="$1"
+    sed \
+        -e "s#__OI_APP_DIR__#${APP_DIR_NAME}#g" \
+        -e "s#__OI_DEFAULT_DEVICE_ID__#${DEFAULT_DEVICE_ID}#g" \
+        "$SOURCE_LAUNCHER_TEMPLATE" > "$out"
 }
 
 have_remote_rsync() {
@@ -203,7 +212,7 @@ echo ""
 
 [[ -d "$SOURCE_ROOT" ]] || { echo "ERROR: Source root not found: ${SOURCE_ROOT}" >&2; exit 1; }
 [[ -d "$SOURCE_CLIENT_DIR" ]] || { echo "ERROR: Source client dir not found: ${SOURCE_CLIENT_DIR}" >&2; exit 1; }
-[[ -f "$SOURCE_LAUNCHER" ]] || { echo "ERROR: Launcher not found: ${SOURCE_LAUNCHER}" >&2; exit 1; }
+[[ -f "$SOURCE_LAUNCHER_TEMPLATE" ]] || { echo "ERROR: Launcher template not found: ${SOURCE_LAUNCHER_TEMPLATE}" >&2; exit 1; }
 [[ -f "$SOURCE_CAPABILITY_PROFILE" ]] || { echo "ERROR: Capability profile not found: ${SOURCE_CAPABILITY_PROFILE}" >&2; exit 1; }
 
 if [[ "$DRY_RUN" == true ]]; then
@@ -235,7 +244,10 @@ echo ""
 echo "=== Syncing top-level runtime files ==="
 copy_file "$SOURCE_CAPABILITY_PROFILE" "${TARGET_DIR}/capability-profile.json"
 if [[ "$DEPLOY_LAUNCHER" == true ]]; then
-    copy_file "$SOURCE_LAUNCHER" "$TARGET_LAUNCHER"
+    tmp_launcher="$(mktemp)"
+    generate_launcher "$tmp_launcher"
+    copy_file "$tmp_launcher" "$TARGET_LAUNCHER"
+    rm -f "$tmp_launcher"
     run_ssh "chmod +x '${TARGET_LAUNCHER}'"
 fi
 
