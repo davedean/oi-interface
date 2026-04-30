@@ -147,7 +147,8 @@ class FasterWhisperBackend:
             temperature=self._temperature,
             initial_prompt=self._initial_prompt,
             word_timestamps=self._word_timestamps,
-            vad_filter=True,
+            # Keep leading speech; VAD can trim short initial words (e.g. "I am").
+            vad_filter=False,
         )
         inference_time_ms = (time.perf_counter() - start_time) * 1000
 

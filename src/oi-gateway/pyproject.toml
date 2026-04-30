@@ -13,6 +13,17 @@ dev = [
 stt = [
     "faster-whisper>=0.10",
 ]
+tts = [
+    "piper-tts>=1.4,<2.0",
+]
+integrations = [
+    "paho-mqtt>=2.1",
+]
+all = [
+    "faster-whisper>=0.10",
+    "piper-tts>=1.4,<2.0",
+    "paho-mqtt>=2.1",
+]
 
 [build-system]
 requires = ["hatchling"]

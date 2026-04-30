@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import base64
+import io
 import logging
 import struct
 import time
 import uuid
+import wave
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -94,28 +96,43 @@ class PiperTtsBackend:
         sentence_silence : float
             Silence between sentences in seconds. Default 0.2.
         """
-        try:
-            import piper_tts
-        except ImportError as exc:
-            raise ImportError(
-                "piper-tts is not installed. "
-                "Install via: pip install piper-tts"
-            ) from exc
-
         self._voice = voice
         self._noise_scale = noise_scale
         self._length_scale = length_scale
         self._temperature = temperature
         self._sentence_silence = sentence_silence
 
-        if model_path:
-            self._synth = piper_tts.PiperSynthesizer(
-                model_path=model_path,
-            )
-        else:
-            self._synth = piper_tts.PiperSynthesizer.load_local(
-                voice=voice,
-            )
+        self._mode = "unknown"
+        self._synth = None
+        self._piper_voice = None
+
+        try:
+            import piper_tts as piper_module
+            if model_path:
+                self._synth = piper_module.PiperSynthesizer(model_path=model_path)
+            else:
+                self._synth = piper_module.PiperSynthesizer.load_local(voice=voice)
+            self._mode = "piper_tts"
+            return
+        except Exception:
+            pass
+
+        try:
+            import piper
+            resolved_model_path = model_path
+            if not resolved_model_path:
+                raise RuntimeError(
+                    "piper module is available but no model path provided. "
+                    "Set OI_PIPER_MODEL_PATH to a .onnx voice model file."
+                )
+            self._piper_voice = piper.PiperVoice.load(resolved_model_path)
+            self._mode = "piper_voice"
+            return
+        except Exception as exc:
+            raise ImportError(
+                "No compatible Piper TTS runtime available. Install piper-tts with a compatible API "
+                "or configure OI_PIPER_MODEL_PATH for piper.PiperVoice."
+            ) from exc
 
     def synthesize(self, text: str) -> bytes:
         """Synthesize text to WAV using Piper.
@@ -130,9 +147,29 @@ class PiperTtsBackend:
         bytes
             WAV audio data.
         """
-        # Synthesize (returns WAV bytes) - this is a blocking call
-        wav_bytes = self._synth.synthesize_wav(text)
-        return wav_bytes
+        if self._mode == "piper_tts":
+            return self._synth.synthesize_wav(text)
+
+        if self._mode == "piper_voice":
+            import numpy as np
+
+            pcm = bytearray()
+            sample_rate = 22050
+            for chunk in self._piper_voice.synthesize(text):
+                sample_rate = chunk.sample_rate
+                floats = np.clip(chunk.audio_float_array, -1.0, 1.0)
+                int16 = (floats * 32767.0).astype(np.int16)
+                pcm.extend(int16.tobytes())
+
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(bytes(pcm))
+            return buf.getvalue()
+
+        raise RuntimeError("Piper backend not initialized")
 
     def synthesize_with_metrics(self, text: str) -> tuple[bytes, TtsMetrics]:
         """Synthesize text with metrics tracking.
