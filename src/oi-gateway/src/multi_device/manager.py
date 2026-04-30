@@ -17,6 +17,24 @@ from datp.events import EventBus, get_event_bus
 
 logger = logging.getLogger(__name__)
 
+
+def _rank_device_loads(
+    device_ids: list[str],
+    load_by_device: dict[str, DeviceLoad],
+    max_load: float,
+) -> list[tuple[str, float]]:
+    """Return eligible devices ranked from lowest to highest load."""
+    candidates: list[tuple[str, float]] = []
+    for device_id in device_ids:
+        load = load_by_device.get(device_id)
+        if load is None:
+            candidates.append((device_id, 0.0))
+        elif load.total_load < max_load:
+            candidates.append((device_id, load.total_load))
+    candidates.sort(key=lambda candidate: candidate[1])
+    return candidates
+
+
 # Event types for multi-device operations
 MULTI_DEVICE_DEVICE_ADDED = "multi_device.device_added"
 MULTI_DEVICE_DEVICE_REMOVED = "multi_device.device_removed"
@@ -190,20 +208,13 @@ class LoadBalancer:
 
     def _least_loaded_select(self, device_ids: list[str]) -> str | None:
         """Select device with lowest load."""
-        candidates = []
-        for device_id in device_ids:
-            load = self._device_loads.get(device_id)
-            if load is None:
-                # Unknown load - treat as available
-                candidates.append((device_id, 0.0))
-            elif load.total_load < self._config.max_load_threshold:
-                candidates.append((device_id, load.total_load))
-
+        candidates = _rank_device_loads(
+            device_ids,
+            self._device_loads,
+            self._config.max_load_threshold,
+        )
         if not candidates:
             return None
-
-        # Sort by load (lowest first)
-        candidates.sort(key=lambda x: x[1])
         return candidates[0][0]
 
     def _weighted_select(self, device_ids: list[str]) -> str | None:
@@ -574,18 +585,9 @@ class MultiDeviceManager:
         max_load: float = 0.9,
     ) -> str | None:
         """Get the device with lowest load from a list."""
-        candidates = []
-        for device_id in device_ids:
-            load = self._device_loads.get(device_id)
-            if load is None:
-                candidates.append((device_id, 0.0))
-            elif load.total_load < max_load:
-                candidates.append((device_id, load.total_load))
-
+        candidates = _rank_device_loads(device_ids, self._device_loads, max_load)
         if not candidates:
             return None
-
-        candidates.sort(key=lambda x: x[1])
         return candidates[0][0]
 
     # -------------------------------------------------------------------------
