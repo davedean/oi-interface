@@ -5,7 +5,6 @@ import json
 import re
 import secrets
 import uuid
-from datetime import datetime
 from typing import Any
 
 from utils import now_iso
@@ -241,6 +240,13 @@ def build_error(
     }
 
 
+def _with_optional_arg(args: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
+    """Return ``args`` after adding ``key`` when ``value`` is not None."""
+    if value is not None:
+        args[key] = value
+    return args
+
+
 def build_command(
     device_id: str,
     op: str,
@@ -283,10 +289,11 @@ def build_display_show_status(
     label: str | None = None,
 ) -> dict[str, Any]:
     """Show a semantic status state on the device display."""
-    args = {"state": state}
-    if label is not None:
-        args["label"] = label
-    return build_command(device_id, "display.show_status", args)
+    return build_command(
+        device_id,
+        "display.show_status",
+        _with_optional_arg({"state": state}, "label", label),
+    )
 
 
 def build_display_show_card(
@@ -303,10 +310,11 @@ def build_display_show_card(
         options: List of button options, each with 'id' and 'label'.
         body: Optional body text to display below title.
     """
-    args = {"title": title, "options": options}
-    if body is not None:
-        args["body"] = body
-    return build_command(device_id, "display.show_card", args)
+    return build_command(
+        device_id,
+        "display.show_card",
+        _with_optional_arg({"title": title, "options": options}, "body", body),
+    )
 
 
 def build_display_show_response_delta(
@@ -316,10 +324,11 @@ def build_display_show_response_delta(
     sequence: int | None = None,
 ) -> dict[str, Any]:
     """Send a final-response text delta during streaming."""
-    args: dict[str, Any] = {"text_delta": text_delta, "is_final": is_final}
-    if sequence is not None:
-        args["sequence"] = sequence
-    return build_command(device_id, "display.show_response_delta", args)
+    return build_command(
+        device_id,
+        "display.show_response_delta",
+        _with_optional_arg({"text_delta": text_delta, "is_final": is_final}, "sequence", sequence),
+    )
 
 
 def build_display_show_progress(
@@ -329,12 +338,12 @@ def build_display_show_progress(
     sequence: int | None = None,
 ) -> dict[str, Any]:
     """Send a progress update while agent is working."""
-    args: dict[str, Any] = {"text": text}
-    if kind is not None:
-        args["kind"] = kind
-    if sequence is not None:
-        args["sequence"] = sequence
-    return build_command(device_id, "display.show_progress", args)
+    args: dict[str, Any] = _with_optional_arg({"text": text}, "kind", kind)
+    return build_command(
+        device_id,
+        "display.show_progress",
+        _with_optional_arg(args, "sequence", sequence),
+    )
 
 
 def build_audio_cache_put_begin(
@@ -355,12 +364,13 @@ def build_audio_cache_put_begin(
         bytes: Total size in bytes (optional).
         label: Short label for the audio (optional).
     """
-    args: dict[str, Any] = {"response_id": response_id, "format": format, "sample_rate": sample_rate}
-    if bytes is not None:
-        args["bytes"] = bytes
-    if label is not None:
-        args["label"] = label
-    return build_command(device_id, "audio.cache.put_begin", args)
+    args: dict[str, Any] = {
+        "response_id": response_id,
+        "format": format,
+        "sample_rate": sample_rate,
+    }
+    _with_optional_arg(args, "bytes", bytes)
+    return build_command(device_id, "audio.cache.put_begin", _with_optional_arg(args, "label", label))
 
 
 def build_audio_cache_chunk(
@@ -385,10 +395,11 @@ def build_audio_cache_put_end(device_id: str, response_id: str, sha256: str | No
         response_id: Identifier for this audio response.
         sha256: Optional SHA256 hash of the cached audio for verification.
     """
-    args: dict[str, Any] = {"response_id": response_id}
-    if sha256 is not None:
-        args["sha256"] = sha256
-    return build_command(device_id, "audio.cache.put_end", args)
+    return build_command(
+        device_id,
+        "audio.cache.put_end",
+        _with_optional_arg({"response_id": response_id}, "sha256", sha256),
+    )
 
 
 def build_audio_play(device_id: str, response_id: str = "latest") -> dict[str, Any]:
