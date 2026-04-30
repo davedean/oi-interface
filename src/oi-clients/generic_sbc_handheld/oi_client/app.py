@@ -19,7 +19,10 @@ from oi_client.state import State
 from oi_client.input import Sdl2Input, InputEvent
 from oi_client.renderer import Sdl2Renderer
 from oi_client.audio import HandheldAudio
+from oi_client.capabilities import build_capabilities
 from oi_client.datp import DatpClient
+from oi_client.device_control import DeviceController
+from oi_client.telemetry import TelemetryCollector
 import time
 
 
@@ -51,6 +54,13 @@ class CardData:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class HandheldApp:
@@ -107,6 +117,35 @@ class HandheldApp:
         self._character_overlay_sprite: str | None = None
         self._character_overlay_label: str = ""
         self._character_pack_id: str = ""
+
+        # Device command / telemetry state
+        self._device_control = DeviceController()
+        self._telemetry = TelemetryCollector()
+        self._next_state_report_at = 0.0
+        self._state_report_interval_s = 10.0
+        self._command_handlers = {
+            "display.show_status": self._handle_display_show_status,
+            "display.show_card": self._handle_display_show_card,
+            "display.show_progress": self._handle_display_show_progress,
+            "display.show_response_delta": self._handle_display_show_response_delta,
+            "character.set_state": self._handle_character_set_state,
+            "audio.cache.put_begin": self._handle_audio_cache_put_begin,
+            "audio.cache.put_chunk": self._handle_audio_cache_put_chunk,
+            "audio.cache.put_end": self._handle_audio_cache_put_end,
+            "audio.play": self._handle_audio_play,
+            "audio.stop": self._handle_audio_stop,
+        }
+        for op in (
+            "device.set_brightness",
+            "device.mute_until",
+            "device.set_volume",
+            "device.set_led",
+            "device.reboot",
+            "device.shutdown",
+            "storage.format",
+            "wifi.configure",
+        ):
+            self._command_handlers[op] = self._handle_device_command
 
         # Display version
         self._version = self._get_version()
@@ -212,36 +251,7 @@ class HandheldApp:
 
     def _build_capabilities(self, audio_status) -> dict:
         cols, rows = self.renderer.effective_text_grid()
-        caps = {
-            "input": ["buttons", "dpad", "confirm_buttons"],
-            "output": ["screen", "cached_audio"],
-            "sensors": ["battery", "wifi_rssi"],
-            "commands_supported": [
-                "display.show_status",
-                "display.show_card",
-                "display.show_progress",
-                "display.show_response_delta",
-                "audio.cache.put_begin",
-                "audio.cache.put_chunk",
-                "audio.cache.put_end",
-                "audio.play",
-                "audio.stop",
-                "device.set_brightness",
-                "device.mute_until",
-            ],
-            "display_width": cols,
-            "display_height": rows,
-            "has_audio_input": audio_status.has_input,
-            "has_audio_output": audio_status.has_output,
-            "supports_text_input": False,
-            "supports_confirm_buttons": True,
-            "supports_scrolling_cards": True,
-            "supports_voice": audio_status.has_input,
-            "max_spoken_duration_s": 120,
-        }
-        if audio_status.has_input:
-            caps["input"].append("hold_to_record")
-        return caps
+        return build_capabilities(audio_status, cols, rows)
 
     # ------------------------------------------------------------------
     # Tick
@@ -257,11 +267,17 @@ class HandheldApp:
             # Process DATP commands
             if self.datp:
                 for cmd in self.datp.get_commands():
-                    self._handle_command(cmd)
+                    await self._handle_command(cmd)
                 # Check connection status
                 if not self.datp.is_connected and self._online:
                     self._online = False
                     self._ui_mode = UIMode.OFFLINE
+
+            if self._device_control.is_muted() and self._ui_mode == UIMode.READY:
+                self._card.title = "Muted"
+                self._card.body = f"Muted until {self._device_control.muted_until}"
+
+            await self._maybe_send_state_report()
 
             # Draw
             self._draw_frame()
@@ -290,6 +306,25 @@ class HandheldApp:
             self._card.title = "Recording"
             self._card.body = f"Streaming audio… {len(chunk)} bytes"
 
+    async def _maybe_send_state_report(self) -> None:
+        if not self.datp or not self.datp.is_connected:
+            return
+        now = time.time()
+        if now < self._next_state_report_at:
+            return
+        audio_cache_used_bytes = sum(
+            os.path.getsize(path)
+            for path in self._response_audio.values()
+            if os.path.exists(path)
+        )
+        payload = self._telemetry.collect(
+            mode=self._current_state().value,
+            muted_until=self._device_control.muted_until,
+            audio_cache_used_bytes=audio_cache_used_bytes,
+        )
+        await self.datp.send_state_report(**payload)
+        self._next_state_report_at = now + self._state_report_interval_s
+
     # ------------------------------------------------------------------
     # Input handling
     # ------------------------------------------------------------------
@@ -303,6 +338,11 @@ class HandheldApp:
 
         # Handle long-press recording controls before generic pressed gating.
         if ev.name == "x" and ev.action == "pressed" and self._ui_mode in (UIMode.HOME, UIMode.READY):
+            if self._device_control.is_muted():
+                self._card.title = "Muted"
+                self._card.body = f"Muted until {self._device_control.muted_until}"
+                self._ui_mode = UIMode.CARD
+                return
             # Start capture immediately so early speech isn't lost; only publish if long-press confirms.
             self._card.title = "Voice"
             self._card.body = "Hold X…"
@@ -318,7 +358,7 @@ class HandheldApp:
         if ev.name == "x" and ev.action == "long_press" and self._ui_mode in (UIMode.HOME, UIMode.READY):
             self._x_long_press_seen = True
             ok = await self.start_recording()
-            if not ok:
+            if not ok and not self._device_control.is_muted():
                 self._card.title = "Voice"
                 self._card.body = "Mic not available"
                 self._ui_mode = UIMode.ERROR
@@ -373,6 +413,10 @@ class HandheldApp:
 
         elif self._ui_mode == UIMode.CARD:
             if ev.name == "a":
+                if self._device_control.is_muted():
+                    self._card.title = "Muted"
+                    self._card.body = f"Muted until {self._device_control.muted_until}"
+                    return
                 last_response = list(self._response_audio.keys())[-1] if self._response_audio else "latest"
                 wav_path = self._response_audio.get(last_response)
                 if wav_path and os.path.exists(wav_path):
@@ -431,6 +475,11 @@ class HandheldApp:
             self._menu_idx = (self._menu_idx + 1) % len(self._menu_items)
 
     async def _send_prompt(self, text: str) -> None:
+        if self._device_control.is_muted():
+            self._card.title = "Muted"
+            self._card.body = f"Muted until {self._device_control.muted_until}"
+            self._ui_mode = UIMode.CARD
+            return
         if not self.datp or not self.datp.is_connected:
             self._ui_mode = UIMode.OFFLINE
             return
@@ -451,144 +500,179 @@ class HandheldApp:
     # Command handling (from gateway)
     # ------------------------------------------------------------------
 
-    def _handle_command(self, cmd: dict) -> None:
+    async def _handle_command(self, cmd: dict) -> None:
         op = cmd.get("op", "")
         args = cmd.get("args", {})
+        command_id = cmd.get("command_id", "")
+        handler = self._command_handlers.get(op)
+        ok = False
+        if handler is None:
+            logger.warning("Unhandled gateway command: %s", op)
+        else:
+            ok = bool(handler(op, args))
+        if self.datp and command_id:
+            await self.datp.ack_command(command_id, ok, op=op, args=args)
 
-        if op == "display.show_status":
-            state = args.get("state", "")
-            label = args.get("label", "")
-            self._ui_mode = self._state_to_ui(state)
-            self._card.title = state.capitalize() if state else "Oi"
-            if label:
-                self._card.body = label
+    def _handle_display_show_status(self, _op: str, args: dict) -> bool:
+        state = args.get("state", "")
+        label = args.get("label", "")
+        self._ui_mode = self._state_to_ui(state)
+        self._card.title = state.capitalize() if state else "Oi"
+        if label:
+            self._card.body = label
+        return True
 
-        elif op == "display.show_card":
-            self._card.title = args.get("title", "Response")
-            self._card.body = args.get("body", "")
+    def _handle_display_show_card(self, _op: str, args: dict) -> bool:
+        self._card.title = args.get("title", "Response")
+        self._card.body = args.get("body", "")
+        self._card_scroll = 0
+        self._ui_mode = UIMode.CARD
+        return True
+
+    def _handle_display_show_progress(self, _op: str, args: dict) -> bool:
+        text = (args.get("text", "") or "").strip()
+        if text and self._ui_mode == UIMode.WAITING:
+            self._card.title = "Working"
+            body = self._card.body or ""
+            self._card.body = (body + ("\n" if body else "") + f"• {text}")[-1200:]
+            self._progress_scroll = self._max_card_scroll("Waiting", self._card.body)
+        return True
+
+    def _handle_display_show_response_delta(self, _op: str, args: dict) -> bool:
+        text_delta = args.get("text_delta", "")
+        is_final = bool(args.get("is_final", False))
+        if text_delta:
+            if self._ui_mode != UIMode.CARD or self._card.title != "Response":
+                self._card.title = "Response"
+                self._card.body = ""
+                self._card_scroll = 0
+            self._card.body = (self._card.body or "") + text_delta
+        if is_final:
             self._card_scroll = 0
             self._ui_mode = UIMode.CARD
+        elif self._ui_mode == UIMode.WAITING and text_delta:
+            self._ui_mode = UIMode.CARD
+        return True
 
-        elif op == "display.show_progress":
-            text = (args.get("text", "") or "").strip()
-            if text:
-                if self._ui_mode == UIMode.WAITING:
-                    self._card.title = "Working"
-                    body = self._card.body or ""
-                    self._card.body = (body + ("\n" if body else "") + f"• {text}")[-1200:]
-                    self._progress_scroll = self._max_card_scroll("Waiting", self._card.body)
+    def _handle_character_set_state(self, _op: str, args: dict) -> bool:
+        self._character_sprite = args.get("sprite")
+        self._character_label = args.get("label", "")
+        self._character_animation = args.get("animation")
+        self._character_overlay_sprite = args.get("overlay")
+        self._character_overlay_label = args.get("overlay_label", "")
+        self._character_pack_id = args.get("pack_id", "")
+        return True
 
-        elif op == "display.show_response_delta":
-            text_delta = args.get("text_delta", "")
-            is_final = bool(args.get("is_final", False))
-            if text_delta:
-                if self._ui_mode != UIMode.CARD or self._card.title != "Response":
-                    self._card.title = "Response"
-                    self._card.body = ""
-                    self._card_scroll = 0
-                self._card.body = (self._card.body or "") + text_delta
-            if is_final:
-                self._card_scroll = 0
-                self._ui_mode = UIMode.CARD
-            elif self._ui_mode == UIMode.WAITING and text_delta:
-                self._ui_mode = UIMode.CARD
-
-        elif op == "character.set_state":
-            self._character_sprite = args.get("sprite")
-            self._character_label = args.get("label", "")
-            self._character_animation = args.get("animation")
-            self._character_overlay_sprite = args.get("overlay")
-            self._character_overlay_label = args.get("overlay_label", "")
-            self._character_pack_id = args.get("pack_id", "")
-
-        elif op == "audio.cache.put_begin":
-            self._recording_stream_id = args.get("stream_id", f"stream_{uuid.uuid4().hex[:8]}")
-            self._recording_chunks = []
-            self._recording_format = str(args.get("format", "pcm16") or "pcm16").lower()
-            self._recording_sample_rate = int(args.get("sample_rate", 24000) or 24000)
-            self._recording_channels = int(args.get("channels", 1) or 1)
+    def _handle_audio_cache_put_begin(self, _op: str, args: dict) -> bool:
+        self._recording_stream_id = args.get("stream_id", f"stream_{uuid.uuid4().hex[:8]}")
+        self._recording_chunks = []
+        self._recording_format = str(args.get("format", "pcm16") or "pcm16").lower()
+        self._recording_sample_rate = _coerce_int(args.get("sample_rate", 24000) or 24000, 24000)
+        self._recording_channels = _coerce_int(args.get("channels", 1) or 1, 1)
+        if not self._device_control.is_muted() and self._recording_format not in {"wav", "audio/wav", "wave"}:
             self.audio.start_pcm_stream(sample_rate=self._recording_sample_rate, channels=self._recording_channels)
-            logger.info(
-                "audio.begin stream_id=%s response_id=%s format=%s sr=%s ch=%s",
-                self._recording_stream_id,
-                args.get("response_id", "latest"),
-                self._recording_format,
-                self._recording_sample_rate,
-                self._recording_channels,
-            )
+        logger.info(
+            "audio.begin stream_id=%s response_id=%s format=%s sr=%s ch=%s",
+            self._recording_stream_id,
+            args.get("response_id", "latest"),
+            self._recording_format,
+            self._recording_sample_rate,
+            self._recording_channels,
+        )
+        return True
 
-        elif op == "audio.cache.put_chunk":
-            import base64
-            try:
-                chunk = base64.b64decode(args.get("data_b64", ""))
-            except Exception:
-                chunk = b""
-            if chunk:
-                self._recording_chunks.append(chunk)
-                self.audio.write_pcm_stream(chunk)
-                logger.debug(
-                    "audio.chunk stream_id=%s seq=%s bytes=%d total_chunks=%d",
-                    self._recording_stream_id,
-                    args.get("seq"),
-                    len(chunk),
-                    len(self._recording_chunks),
-                )
+    def _handle_audio_cache_put_chunk(self, _op: str, args: dict) -> bool:
+        import base64
+        try:
+            chunk = base64.b64decode(args.get("data_b64", ""))
+        except Exception:
+            chunk = b""
+        if not chunk:
+            return False
+        self._recording_chunks.append(chunk)
+        if not self._device_control.is_muted() and self._recording_format not in {"wav", "audio/wav", "wave"}:
+            self.audio.write_pcm_stream(chunk)
+        logger.debug(
+            "audio.chunk stream_id=%s seq=%s bytes=%d total_chunks=%d",
+            self._recording_stream_id,
+            args.get("seq"),
+            len(chunk),
+            len(self._recording_chunks),
+        )
+        return True
 
-        elif op == "audio.cache.put_end":
-            if not self._recording_chunks:
-                logger.warning("audio.end with no chunks stream_id=%s response_id=%s", self._recording_stream_id, args.get("response_id", "latest"))
-                self._card.title = "Audio"
-                self._card.body = "No audio chunks received"
-                self._ui_mode = UIMode.CARD
-                return
-
-            combined = b"".join(self._recording_chunks)
-
-            # Gateway currently sends PCM chunks even when format is "wav_pcm16".
-            # Treat only explicit WAV container formats as already-headered audio.
-            fmt = self._recording_format
-            is_wav_container = fmt in {"wav", "audio/wav", "wave"}
-
-            if is_wav_container:
-                fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="oi_audio_")
-                with os.fdopen(fd, "wb") as fh:
-                    fh.write(combined)
-                wav = wav_path
-            else:
-                wav = str(self.audio.save_wav(
-                    combined,
-                    sample_rate=self._recording_sample_rate,
-                    channels=self._recording_channels,
-                ))
-
+    def _handle_audio_cache_put_end(self, _op: str, args: dict) -> bool:
+        if not self._recording_chunks:
             self.audio.end_pcm_stream()
-            response_id = args.get("response_id", "latest")
-            self._response_audio[response_id] = wav
-            logger.info(
-                "audio.end stream_id=%s response_id=%s format=%s chunks=%d total_bytes=%d wav=%s",
-                self._recording_stream_id,
-                response_id,
-                fmt,
-                len(self._recording_chunks),
-                len(combined),
-                wav,
-            )
-            logger.info("audio.cached response_id=%s path=%s (live stream already started)", response_id, wav)
-            self._recording_chunks = []
+            logger.warning("audio.end with no chunks stream_id=%s response_id=%s", self._recording_stream_id, args.get("response_id", "latest"))
+            self._card.title = "Audio"
+            self._card.body = "No audio chunks received"
+            self._ui_mode = UIMode.CARD
+            return False
 
-        elif op == "audio.play":
-            response_id = args.get("response_id", "latest")
-            wav_path = self._response_audio.get(response_id)
-            if wav_path and os.path.exists(wav_path):
-                self.audio.play(wav_path)
-            elif response_id == "latest" and self._response_audio:
-                last_wav = list(self._response_audio.values())[-1]
-                if os.path.exists(last_wav):
-                    self.audio.play(last_wav)
+        combined = b"".join(self._recording_chunks)
+        fmt = self._recording_format
+        is_wav_container = fmt in {"wav", "audio/wav", "wave"}
 
-        elif op == "audio.stop":
+        if is_wav_container:
+            fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="oi_audio_")
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(combined)
+            wav = wav_path
+        else:
+            wav = str(self.audio.save_wav(
+                combined,
+                sample_rate=self._recording_sample_rate,
+                channels=self._recording_channels,
+            ))
+
+        self.audio.end_pcm_stream()
+        response_id = args.get("response_id", "latest")
+        self._response_audio[response_id] = wav
+        logger.info(
+            "audio.end stream_id=%s response_id=%s format=%s chunks=%d total_bytes=%d wav=%s",
+            self._recording_stream_id,
+            response_id,
+            fmt,
+            len(self._recording_chunks),
+            len(combined),
+            wav,
+        )
+        logger.info("audio.cached response_id=%s path=%s (live stream already started)", response_id, wav)
+        self._recording_chunks = []
+        return True
+
+    def _handle_audio_play(self, _op: str, args: dict) -> bool:
+        if self._device_control.is_muted():
             self.audio.stop()
+            self._card.title = "Muted"
+            self._card.body = f"Muted until {self._device_control.muted_until}"
+            self._ui_mode = UIMode.CARD
+            return True
+        response_id = args.get("response_id", "latest")
+        wav_path = self._response_audio.get(response_id)
+        if wav_path and os.path.exists(wav_path):
+            return self.audio.play(wav_path)
+        if response_id == "latest" and self._response_audio:
+            last_wav = list(self._response_audio.values())[-1]
+            if os.path.exists(last_wav):
+                return self.audio.play(last_wav)
+        return False
 
+    def _handle_audio_stop(self, _op: str, _args: dict) -> bool:
+        self.audio.stop()
+        return True
+
+    def _handle_device_command(self, op: str, args: dict) -> bool:
+        result = self._device_control.apply(op, args)
+        if op == "device.mute_until" and result.ok:
+            self.audio.stop()
+            self._ui_mode = UIMode.HOME
+        if not result.ok:
+            logger.warning("Device command %s failed: %s", op, result.message)
+        else:
+            logger.info("Device command %s: %s", op, result.message)
+        return result.ok
     def _state_to_ui(self, state: str) -> UIMode:
         mapping = {
             "idle": UIMode.READY,
@@ -601,6 +685,25 @@ class HandheldApp:
             "error": UIMode.ERROR,
         }
         return mapping.get(state.lower(), UIMode.HOME)
+
+    def _current_state(self) -> State:
+        if self._ui_mode == UIMode.CONNECTING:
+            return State.BOOTING
+        if self._ui_mode == UIMode.RECORDING:
+            return State.RECORDING
+        if self._ui_mode == UIMode.WAITING:
+            return State.THINKING
+        if self._ui_mode == UIMode.OFFLINE:
+            return State.OFFLINE
+        if self._ui_mode == UIMode.ERROR:
+            return State.ERROR
+        if self._device_control.is_muted():
+            return State.MUTED
+        if self.audio.is_playing():
+            return State.PLAYING
+        if self._ui_mode == UIMode.CARD:
+            return State.RESPONSE_CACHED
+        return State.READY
 
     # ------------------------------------------------------------------
     # Rendering
@@ -623,8 +726,12 @@ class HandheldApp:
             self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
 
         elif self._ui_mode == UIMode.READY or self._ui_mode == UIMode.HOME:
-            lines = ["Select a prompt:"] + [f"  {'>' if i == self._prompt_idx else ' '} {p}" for i, p in enumerate(CANNED_PROMPTS)]
-            self.renderer.draw_card("Home", lines, 0, ascii_bg_lines=blob)
+            if self._device_control.is_muted():
+                lines = [f"Muted until {self._device_control.muted_until or 'unknown'}", "", "Gateway commands still sync."]
+                self.renderer.draw_card("Muted", lines, 0, ascii_bg_lines=blob)
+            else:
+                lines = ["Select a prompt:"] + [f"  {'>' if i == self._prompt_idx else ' '} {p}" for i, p in enumerate(CANNED_PROMPTS)]
+                self.renderer.draw_card("Home", lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.WAITING:
             # While waiting, show live progress and keep newest entries on screen.
@@ -774,6 +881,8 @@ class HandheldApp:
                 return "A=Replay  B=Back  Up/Down=Scroll"
             return "B=Back  Up/Down=Scroll"
         elif self._ui_mode in (UIMode.HOME, UIMode.READY):
+            if self._device_control.is_muted():
+                return "Muted  Start=Menu"
             return "Up/Down=Select  A=Send  Hold X=Talk  Start=Menu"
         elif self._ui_mode == UIMode.MENU:
             return "Up/Down=Select  A=Confirm  B=Cancel"
@@ -810,6 +919,11 @@ class HandheldApp:
 
     async def start_recording(self) -> bool:
         """Promote active capture into a published voice stream."""
+        if self._device_control.is_muted():
+            self._card.title = "Muted"
+            self._card.body = f"Muted until {self._device_control.muted_until}"
+            self._ui_mode = UIMode.CARD
+            return False
         if not self.datp or not self.datp.is_connected:
             return False
         if not self.audio.is_recording:

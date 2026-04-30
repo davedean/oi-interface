@@ -42,6 +42,9 @@ oi_client/
 ├── input.py         # SDL2 gamepad → logical events
 ├── renderer.py      # SDL2 text cards, status, scrolling
 ├── audio.py         # aplay playback, optional SDL2 mic capture
+├── capabilities.py  # DATP command/capability contract
+├── device_control.py# local brightness/mute/volume/LED/power handlers
+├── telemetry.py     # periodic state payload collection
 └── app.py           # Main loop: HOME → CONNECTING → READY → CARD
 ```
 
@@ -76,12 +79,23 @@ From EmulationStation (production):
 
 Source: `sdl2_button_map.py` wizard on device, 2026-04-29.
 
+## Gateway command support
+
+Implemented locally:
+- `display.show_status`, `display.show_card`, `display.show_progress`, `display.show_response_delta`
+- `audio.cache.put_begin`, `audio.cache.put_chunk`, `audio.cache.put_end`, `audio.play`, `audio.stop`
+- `device.set_brightness`, `device.mute_until`, `device.set_volume`, `device.set_led`
+- `character.set_state`
+
+Recognized but not advertised in capability negotiation:
+- `device.reboot`, `device.shutdown` are blocked unless `OI_ENABLE_POWER_COMMANDS=1`
+- `storage.format`, `wifi.configure` are recognized but currently return local no-op/failure status
+
+The client now also sends periodic DATP `state` reports with any discoverable battery/Wi-Fi/memory info.
+
 ## Known issues / TODO
 
-- [ ] Callbacks for reply streaming
 - [ ] DatpClient exposes asyncio.Queue for commands — should this be thread safe?
 - [ ] TTF font sizing needs empirical tuning per device
-- [ ] Cached audio needs actual WAV file playback (untested)
 - [ ] No testing for aplay kill (pkill)
 - [ ] `aplay` simple, but might need `ffplay` or SDL2 audio for better control
-- [ ] `audioplayer_wavefronts` not implemented (gateway may send WAV, not chunked PCM)

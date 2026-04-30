@@ -164,16 +164,16 @@ class DatpClient:
         if msg_type == "command":
             op = payload.get("op", "")
             args = payload.get("args", {})
-            try:
-                self._state_machine.receive_command(op, args)
-            except InvalidTransition:
-                pass
-            self._received_commands.append(payload)
+            queued = {
+                "command_id": msg.get("id", ""),
+                "op": op,
+                "args": args,
+            }
+            self._received_commands.append(queued)
             # Prevent unbounded growth - keep last 100 commands
             if len(self._received_commands) > 100:
                 self._received_commands = self._received_commands[-100:]
-            await self._ack(msg.get("id", ""))
-            await self._cmd_queue.put(payload)
+            await self._cmd_queue.put(queued)
 
         elif msg_type == "error":
             code = payload.get("code", "")
@@ -186,7 +186,7 @@ class DatpClient:
         elif msg_type == "ack":
             pass  # Not yet used for outbound commands
 
-    async def _ack(self, command_id: str) -> None:
+    async def _ack(self, command_id: str, ok: bool = True) -> None:
         if not self._ws:
             return
         ack = {
@@ -195,7 +195,7 @@ class DatpClient:
             "id": _new_id("ack"),
             "device_id": self.device_id,
             "ts": _now_iso(),
-            "payload": {"command_id": command_id, "ok": True},
+            "payload": {"command_id": command_id, "ok": ok},
         }
         await self._ws.send(json.dumps(ack))
 
@@ -232,11 +232,12 @@ class DatpClient:
     async def send_text_prompt(self, text: str) -> None:
         await self._send("event", {"event": "text.prompt", "text": text, "nonce": secrets.token_hex(8)})
 
-    async def send_state_report(self) -> None:
-        await self._send("state", {
+    async def send_state_report(self, **extra_fields: Any) -> None:
+        payload: dict[str, Any] = {
             "mode": self._state_machine.state.value,
-            "muted_until": None,
-        })
+        }
+        payload.update({k: v for k, v in extra_fields.items() if v is not None})
+        await self._send("state", payload)
 
     async def send_audio_chunk(self, stream_id: str, seq: int, pcm16_data: bytes, sample_rate: int = 16000) -> None:
         await self._send("audio_chunk", {
@@ -254,6 +255,14 @@ class DatpClient:
             "stream_id": stream_id,
             "duration_ms": duration_ms,
         })
+
+    async def ack_command(self, command_id: str, ok: bool, op: str | None = None, args: dict | None = None) -> None:
+        if ok and op:
+            try:
+                self._state_machine.receive_command(op, args or {})
+            except InvalidTransition:
+                pass
+        await self._ack(command_id, ok)
 
     # ------------------------------------------------------------------
     # Command queue
