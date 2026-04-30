@@ -5,125 +5,14 @@ Extends the basic REPL to display agent responses as they stream in,
 rather than waiting for the complete response.
 """
 
-import asyncio
-import shlex
-import sys
-from typing import Optional
+from __future__ import annotations
 
-from sim import OiSim
-from sim.state import State
+import asyncio
+from typing import Any
+
 from sim.repl import OiSimREPL
 
-
-class StreamingOiSimREPL(OiSimREPL):
-    """Interactive REPL for OiSim with live agent text streaming."""
-
-    def __init__(
-        self,
-        gateway: str = "ws://localhost:8787/datp",
-        device_id: str = "oi-sim-repl-001",
-    ):
-        super().__init__(gateway=gateway, device_id=device_id)
-        self.streaming_active = False
-        self.current_response_text = ""
-
-    async def _receive_loop(self):
-        """Background task to receive and display messages from gateway.
-        
-        Extended to display agent text deltas in real-time.
-        """
-        while self.running and self.sim:
-            await asyncio.sleep(0.1)
-            
-            # Print each new command exactly once.
-            # NOTE: Gateway streams text via command: display.show_text_delta
-            # (not via DATP event agent_response_delta to devices).
-            commands = self.sim.received_commands
-            if len(commands) > self._printed_command_count:
-                new_commands = commands[self._printed_command_count:]
-                for cmd in new_commands:
-                    op = cmd.get("op", "unknown")
-                    args = cmd.get("args", {})
-
-                    if op == "display.show_progress":
-                        text = args.get("text", "")
-                        if text:
-                            print(f"⚙️  {text}")
-                        continue
-
-                    if op == "display.show_response_delta":
-                        text_delta = args.get("text_delta", "")
-                        is_final = args.get("is_final", False)
-
-                        # Progress/status lines are wrapped like "\n[thinking] ...\n"
-                        # and should be shown separately from assistant answer text.
-                        stripped = text_delta.strip()
-                        is_progress = stripped.startswith("[") and "]" in stripped and text_delta.startswith("\n")
-
-                        if text_delta:
-                            if is_progress:
-                                # Keep progress compact (no extra blank spacer lines)
-                                print(f"⚙️  {stripped}")
-                            else:
-                                self.current_response_text += text_delta
-                                print(text_delta, end="", flush=True)
-
-                        if is_final:
-                            print()
-                            self.current_response_text = ""
-                        continue
-
-                    print(f"\n📥 {op}")
-                    if op == "display.show_card":
-                        title = args.get("title", "")
-                        body = args.get("body")
-                        if title:
-                            print(f"   title: {title}")
-                        if body:
-                            print(f"   body: {body}")
-                self._printed_command_count = len(commands)
-
-    async def _cmd_text(self, args):
-        """Send a text prompt to the agent and display streaming response."""
-        if not args:
-            print("Usage: text <message> or ask \"<message>\"")
-            print("Example: text what time is it?")
-            return
-        text = " ".join(args)
-        
-        # Clear any previous streaming text
-        self.current_response_text = ""
-        
-        await self.sim.send_text_prompt(text)
-        print(f"📤 text.prompt (text=\"{text}\")")
-        print(f"📥 State: {self.sim.state.value}")
-        print("\n💬 Agent: ", end="", flush=True)  # Ready for streaming output
-
-    async def _cmd_events(self, args):
-        """Show event history."""
-        msgs = self.sim.received_messages
-        if not msgs:
-            print("No events yet")
-            return
-        print(f"Last {len(msgs)} messages:")
-        for i, msg in enumerate(msgs[-20:], 1):  # Show last 20 instead of 10
-            msg_type = msg.get("type", "?")
-            payload = msg.get("payload", {})
-            if msg_type == "command":
-                print(f"  {i}. 📥 {payload.get('op', '?')}")
-            elif msg_type == "event":
-                event = payload.get("event", "?")
-                if event == "agent_response_delta":
-                    text = payload.get("text_delta", "")[:50]
-                    print(f"  {i}. 📤 {event}: '{text}'...")
-                else:
-                    print(f"  {i}. 📤 {event}")
-            else:
-                print(f"  {i}. {msg_type}")
-
-    async def _cmd_help(self, args):
-        """Show help."""
-        print("""
+HELP_TEXT = """
 Commands:
   hold        - Long press (start recording)
   release     - Release button (stop recording)
@@ -145,7 +34,91 @@ Commands:
   quit        - Exit
 
 Streaming: Agent responses appear in real-time as the text streams in!
-""".strip())
+""".strip()
+
+
+class StreamingOiSimREPL(OiSimREPL):
+    """Interactive REPL for OiSim with live agent text streaming."""
+
+    event_history_limit = 20
+    help_text = HELP_TEXT
+
+    def __init__(
+        self,
+        gateway: str = "ws://localhost:8787/datp",
+        device_id: str = "oi-sim-repl-001",
+    ):
+        super().__init__(gateway=gateway, device_id=device_id)
+        self.streaming_active = False
+        self.current_response_text = ""
+
+    async def _receive_loop(self):
+        """Background task to receive and display messages from gateway."""
+        while self.running and self.sim:
+            await asyncio.sleep(0.1)
+            commands = self.sim.received_commands
+            if len(commands) > self._printed_command_count:
+                for command in commands[self._printed_command_count:]:
+                    self._print_streaming_command(command)
+                self._printed_command_count = len(commands)
+
+    def _print_streaming_command(self, command: dict[str, Any]) -> None:
+        """Print a received command, handling streamed text specially."""
+        op = command.get("op", "unknown")
+        args = command.get("args", {})
+
+        if op == "display.show_progress":
+            text = args.get("text", "")
+            if text:
+                print(f"⚙️  {text}")
+            return
+
+        if op == "display.show_response_delta":
+            text_delta = args.get("text_delta", "")
+            is_final = args.get("is_final", False)
+            stripped = text_delta.strip()
+            is_progress = (
+                stripped.startswith("[")
+                and "]" in stripped
+                and text_delta.startswith("\n")
+            )
+
+            if text_delta:
+                if is_progress:
+                    print(f"⚙️  {stripped}")
+                else:
+                    self.current_response_text += text_delta
+                    print(text_delta, end="", flush=True)
+
+            if is_final:
+                print()
+                self.current_response_text = ""
+            return
+
+        self._print_command(command, leading_newline=True)
+
+    def _format_message_history_entry(self, index: int, msg: dict[str, Any]) -> str:
+        """Format a single event-history row with streamed text previews."""
+        msg_type = msg.get("type", "?")
+        payload = msg.get("payload", {})
+        if msg_type == "event" and payload.get("event") == "agent_response_delta":
+            text = payload.get("text_delta", "")[:50]
+            return f"  {index}. 📤 agent_response_delta: '{text}'..."
+        return super()._format_message_history_entry(index, msg)
+
+    async def _cmd_text(self, args):
+        """Send a text prompt to the agent and display streaming response."""
+        assert self.sim is not None
+        if not args:
+            self._print_text_prompt_usage()
+            return
+        text = " ".join(args)
+        self.current_response_text = ""
+
+        await self.sim.send_text_prompt(text)
+        print(f'📤 text.prompt (text="{text}")')
+        print(f"📥 State: {self.sim.state.value}")
+        print("\n💬 Agent: ", end="", flush=True)
 
 
 async def main():

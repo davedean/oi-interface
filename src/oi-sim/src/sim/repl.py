@@ -4,17 +4,47 @@ Oi-Sim REPL: Interactive virtual device command line.
 A simple REPL that lets humans interact with oi-gateway using typed commands.
 """
 
+from __future__ import annotations
+
 import asyncio
 import shlex
-import sys
-from typing import Optional
+from typing import Any
 
 from sim import OiSim
-from sim.state import State
+
+TEXT_PROMPT_USAGE = (
+    "Usage: text <message> or ask \"<message>\"\n"
+    "Example: text what time is it?"
+)
+
+HELP_TEXT = """
+Commands:
+  hold        - Long press (start recording)
+  release     - Release button (stop recording)
+  tap         - Short button press
+  double      - Double tap
+  mute        - Very long hold (mute)
+  text <msg>  - Send text prompt to agent
+  ask <msg>  - Same as text (alias)
+  play [id]   - Start audio playback (default: latest)
+  stop        - Stop audio playback
+  battery N   - Send battery N%
+  charging    - charging start|stop
+  wifi N      - Send wifi RSSI N
+  connect     - Connect to gateway
+  disconnect  - Disconnect
+  state       - Show device state
+  events      - Show event history
+  help        - Show this help
+  quit        - Exit
+""".strip()
 
 
 class OiSimREPL:
     """Interactive REPL for OiSim virtual device."""
+
+    event_history_limit = 10
+    help_text = HELP_TEXT
 
     def __init__(
         self,
@@ -23,9 +53,10 @@ class OiSimREPL:
     ):
         self.gateway = gateway
         self.device_id = device_id
-        self.sim: Optional[OiSim] = None
+        self.sim: OiSim | None = None
         self.running = False
         self._printed_command_count = 0
+        self._receive_task: asyncio.Task[None] | None = None
 
     async def start(self):
         """Start the REPL."""
@@ -45,14 +76,10 @@ class OiSimREPL:
             return
 
         self.running = True
-
-        # Start background task to receive gateway messages
         self._receive_task = asyncio.create_task(self._receive_loop())
 
-        # Main REPL loop
         await self._repl_loop()
 
-        # Cleanup
         if self.sim:
             await self.sim.disconnect()
         print("✓ Disconnected")
@@ -82,32 +109,24 @@ class OiSimREPL:
         cmd = parts[0].lower() if parts else ""
         args = parts[1:]
 
-        # Map commands to OiSim methods
         commands = {
-            # Button events
             "hold": self._cmd_hold,
             "release": self._cmd_release,
             "tap": self._cmd_tap,
             "double": self._cmd_double,
             "mute": self._cmd_mute,
-            # Playback
             "play": self._cmd_play,
             "stop": self._cmd_stop,
-            # Text input
             "text": self._cmd_text,
             "ask": self._cmd_text,
-            # Power
             "battery": self._cmd_battery,
             "charging": self._cmd_charging,
-            # Network
             "wifi": self._cmd_wifi,
             "connect": self._cmd_connect,
             "disconnect": self._cmd_disconnect,
-            # Info
             "state": self._cmd_state,
             "events": self._cmd_events,
             "help": self._cmd_help,
-            # Quit
             "quit": self._cmd_quit,
             "exit": self._cmd_quit,
         }
@@ -124,55 +143,87 @@ class OiSimREPL:
         """Background task to receive and display messages from gateway."""
         while self.running and self.sim:
             await asyncio.sleep(0.1)
-            # Print each new command exactly once.
             commands = self.sim.received_commands
             if len(commands) > self._printed_command_count:
-                new_commands = commands[self._printed_command_count:]
-                for cmd in new_commands:
-                    op = cmd.get("op", "unknown")
-                    args = cmd.get("args", {})
-                    print(f"📥 {op}")
-                    if op == "display.show_card":
-                        title = args.get("title", "")
-                        body = args.get("body")
-                        if title:
-                            print(f"   title: {title}")
-                        if body:
-                            print(f"   body: {body}")
+                for command in commands[self._printed_command_count:]:
+                    self._print_command(command)
                 self._printed_command_count = len(commands)
 
-    # Command implementations
+    def _print_command(self, command: dict[str, Any], *, leading_newline: bool = False) -> None:
+        """Print a received command in a compact human-friendly format."""
+        prefix = "\n" if leading_newline else ""
+        op = command.get("op", "unknown")
+        args = command.get("args", {})
+        print(f"{prefix}📥 {op}")
+        if op == "display.show_card":
+            title = args.get("title", "")
+            body = args.get("body")
+            if title:
+                print(f"   title: {title}")
+            if body:
+                print(f"   body: {body}")
+
+    def _print_text_prompt_usage(self) -> None:
+        """Show usage for text-prompt commands."""
+        print(TEXT_PROMPT_USAGE)
+
+    def _print_event_history(self, messages: list[dict[str, Any]]) -> None:
+        """Print recent message history."""
+        if not messages:
+            print("No events yet")
+            return
+
+        print(f"Last {len(messages)} messages:")
+        for i, msg in enumerate(messages[-self.event_history_limit :], 1):
+            print(self._format_message_history_entry(i, msg))
+
+    def _format_message_history_entry(self, index: int, msg: dict[str, Any]) -> str:
+        """Format a single event-history row."""
+        msg_type = msg.get("type", "?")
+        payload = msg.get("payload", {})
+        if msg_type == "command":
+            return f"  {index}. 📥 {payload.get('op', '?')}"
+        if msg_type == "event":
+            return f"  {index}. 📤 {payload.get('event', '?')}"
+        return f"  {index}. {msg_type}"
+
     async def _cmd_hold(self, args):
         """Long hold - start recording."""
+        assert self.sim is not None
         await self.sim.press_long_hold()
         print("📤 button.long_hold_started (button=main)")
         print(f"📥 State: {self.sim.state.value}")
 
     async def _cmd_release(self, args):
         """Release - stop recording."""
+        assert self.sim is not None
         await self.sim.release()
         print("📤 audio.recording_finished")
         print(f"📥 State: {self.sim.state.value}")
 
     async def _cmd_tap(self, args):
         """Short tap."""
+        assert self.sim is not None
         await self.sim.press_button()
         print("📤 button.pressed (button=main)")
 
     async def _cmd_double(self, args):
         """Double tap."""
+        assert self.sim is not None
         await self.sim.double_tap()
         print("📤 button.double_tap (button=main)")
         print(f"📥 State: {self.sim.state.value}")
 
     async def _cmd_mute(self, args):
         """Very long hold - mute."""
+        assert self.sim is not None
         await self.sim.press_very_long_hold()
         print("📤 button.very_long_hold_started (button=main)")
         print(f"📥 State: {self.sim.state.value}")
 
     async def _cmd_play(self, args):
         """Start playback."""
+        assert self.sim is not None
         response_id = args[0] if args else "latest"
         await self.sim.send_playback_started(response_id)
         print(f"📤 audio.playback_started (response_id={response_id})")
@@ -180,23 +231,25 @@ class OiSimREPL:
 
     async def _cmd_stop(self, args):
         """Stop playback."""
+        assert self.sim is not None
         await self.sim.send_playback_finished()
         print("📤 audio.playback_finished")
         print(f"📥 State: {self.sim.state.value}")
 
     async def _cmd_text(self, args):
         """Send a text prompt to the agent."""
+        assert self.sim is not None
         if not args:
-            print("Usage: text <message> or ask \"<message>\"")
-            print("Example: text what time is it?")
+            self._print_text_prompt_usage()
             return
         text = " ".join(args)
         await self.sim.send_text_prompt(text)
-        print(f"📤 text.prompt (text=\"{text}\")")
+        print(f'📤 text.prompt (text="{text}")')
         print(f"📥 State: {self.sim.state.value}")
 
     async def _cmd_battery(self, args):
         """Send battery update."""
+        assert self.sim is not None
         if not args:
             print("Usage: battery <0-100>")
             return
@@ -206,6 +259,7 @@ class OiSimREPL:
 
     async def _cmd_charging(self, args):
         """Send charging state."""
+        assert self.sim is not None
         if not args:
             print("Usage: charging start|stop")
             return
@@ -218,6 +272,7 @@ class OiSimREPL:
 
     async def _cmd_wifi(self, args):
         """Send WiFi update."""
+        assert self.sim is not None
         if not args:
             print("Usage: wifi <-100 to 0>")
             return
@@ -227,6 +282,7 @@ class OiSimREPL:
 
     async def _cmd_connect(self, args):
         """Reconnect to gateway."""
+        assert self.sim is not None
         if self.sim.is_connected:
             print("Already connected")
             return
@@ -235,11 +291,13 @@ class OiSimREPL:
 
     async def _cmd_disconnect(self, args):
         """Disconnect from gateway."""
+        assert self.sim is not None
         await self.sim.disconnect()
         print("✓ Disconnected")
 
     async def _cmd_state(self, args):
         """Show device state."""
+        assert self.sim is not None
         state = self.sim.state.value
         display = self.sim.display_state or "none"
         label = self.sim.display_label or ""
@@ -252,44 +310,12 @@ class OiSimREPL:
 
     async def _cmd_events(self, args):
         """Show event history."""
-        msgs = self.sim.received_messages
-        if not msgs:
-            print("No events yet")
-            return
-        print(f"Last {len(msgs)} messages:")
-        for i, msg in enumerate(msgs[-10:], 1):
-            msg_type = msg.get("type", "?")
-            payload = msg.get("payload", {})
-            if msg_type == "command":
-                print(f"  {i}. 📥 {payload.get('op', '?')}")
-            elif msg_type == "event":
-                print(f"  {i}. 📤 {payload.get('event', '?')}")
-            else:
-                print(f"  {i}. {msg_type}")
+        assert self.sim is not None
+        self._print_event_history(self.sim.received_messages)
 
     async def _cmd_help(self, args):
         """Show help."""
-        print("""
-Commands:
-  hold        - Long press (start recording)
-  release     - Release button (stop recording)
-  tap         - Short button press
-  double      - Double tap
-  mute        - Very long hold (mute)
-  text <msg>  - Send text prompt to agent
-  ask <msg>  - Same as text (alias)
-  play [id]   - Start audio playback (default: latest)
-  stop        - Stop audio playback
-  battery N   - Send battery N%
-  charging    - charging start|stop
-  wifi N      - Send wifi RSSI N
-  connect     - Connect to gateway
-  disconnect  - Disconnect
-  state       - Show device state
-  events      - Show event history
-  help        - Show this help
-  quit        - Exit
-        """.strip())
+        print(self.help_text)
 
     async def _cmd_quit(self, args):
         """Quit the REPL."""
