@@ -12,6 +12,7 @@ from aiohttp import web
 
 from .fallback_html import INLINE_DASHBOARD_HTML
 from .gateway_api import GatewayApi
+from .sse import SseHub
 from .state import DashboardState, DeviceState, TranscriptEntry
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,8 @@ class Dashboard:
         self._state = DashboardState(max_transcripts=max_transcripts)
         self._devices = self._state.devices
         self._transcripts = self._state.transcripts
-        self._sse_clients: set[web.StreamResponse] = set()
+        self._sse_hub = SseHub()
+        self._sse_clients = self._sse_hub.clients
         self._running = False
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
@@ -97,12 +99,7 @@ class Dashboard:
                 await self._poll_task
             except asyncio.CancelledError:
                 pass
-        for client in list(self._sse_clients):
-            try:
-                if client.prepared:
-                    await client.write_eof()
-            except Exception:
-                pass
+        await self._sse_hub.close()
         if self._runner:
             await self._runner.cleanup()
         logger.info("Dashboard stopped")
@@ -129,46 +126,17 @@ class Dashboard:
 
     async def _events_sse(self, request: web.Request) -> web.StreamResponse:
         """Server-Sent Events endpoint for real-time updates."""
-        response = web.StreamResponse(
-            status=200,
-            reason="OK",
-            headers={
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-        await response.prepare(request)
-        self._sse_clients.add(response)
-        await self._send_sse_event(response, "init", self._state.snapshot())
-
-        try:
-            while self._running:
-                await asyncio.sleep(30)
-                if response.prepared:
-                    await response.write(b": ping\n\n")
-        except (ConnectionResetError, BrokenPipeError):
-            pass
-        finally:
-            self._sse_clients.discard(response)
-
+        response = await self._sse_hub.connect(request, self._state.snapshot())
+        await self._sse_hub.keepalive(response, is_running=lambda: self._running)
         return response
 
     async def _send_sse_event(self, response: web.StreamResponse, event_type: str, data: Any) -> None:
         """Send an SSE event to a client."""
-        if not response.prepared:
-            return
-        try:
-            payload = json.dumps({"type": event_type, "data": data})
-            await response.write(f"data: {payload}\n\n".encode())
-        except Exception as error:
-            logger.debug("SSE send failed: %s", error)
+        await self._sse_hub.send_event(response, event_type, data)
 
     def _broadcast(self, event_type: str, data: Any) -> None:
         """Broadcast an SSE event to all connected clients."""
-        for client in list(self._sse_clients):
-            asyncio.create_task(self._send_sse_event(client, event_type, data))
+        self._sse_hub.broadcast(event_type, data)
 
     async def _api_devices(self, _request: web.Request) -> web.Response:
         """Proxy to gateway /api/devices."""
