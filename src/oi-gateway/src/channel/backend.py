@@ -20,6 +20,8 @@ class AgentRequest:
     prompt_text: str | None = None
     transcript: str | None = None
     session_key: str | None = None
+    backend_id: str | None = None
+    agent_id: str | None = None
     correlation_id: str | None = None
     idempotency_key: str | None = None
     device_context: dict[str, Any] = field(default_factory=dict)

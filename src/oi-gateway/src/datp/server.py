@@ -47,6 +47,10 @@ class DATPServer:
         port: int = 8787,
         event_bus: EventBus | None = None,
         registry: RegistryService | None = None,
+        available_backends: list[dict[str, Any]] | None = None,
+        default_backend_id: str | None = None,
+        default_agent: dict[str, Any] | None = None,
+        available_agents: list[dict[str, Any]] | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -57,6 +61,10 @@ class DATPServer:
         self._stopping = False
         self._server: websockets.WebSocketServer | None = None
         self.device_registry: dict[str, DeviceEntry] = {}
+        self.available_backends = available_backends or []
+        self.default_backend_id = default_backend_id or (self.available_backends[0]["id"] if self.available_backends else None)
+        self.default_agent = default_agent
+        self.available_agents = available_agents or ([] if default_agent is None else [default_agent])
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -116,15 +124,12 @@ class DATPServer:
             # Normal disconnect — no error to report.
             pass
         finally:
-            # Clean up the registry entry if it still exists.
-            # Safe to del unconditionally on a KeyError.
-            if device_id and device_id in self.device_registry:
+            # Only clear the registry entry if this connection still owns it.
+            entry = self.device_registry.get(device_id) if device_id else None
+            if device_id and entry and entry.get("ws") is ws:
                 del self.device_registry[device_id]
-            # Notify registry of disconnect if integrated.
-            # Call synchronously (fire-and-forget) to avoid blocking the
-            # connection handler — the registry schedules its async work.
-            if device_id and self.registry is not None:
-                self.registry.device_disconnected(device_id)
+                if self.registry is not None:
+                    self.registry.device_disconnected(device_id)
 
     # ------------------------------------------------------------------
     # Message dispatch
@@ -191,10 +196,16 @@ class DATPServer:
     # Hello handshake
     # ------------------------------------------------------------------
 
+    def get_device_conversation(self, device_id: str) -> dict[str, Any]:
+        entry = self.device_registry.get(device_id) or {}
+        conversation = entry.get("conversation")
+        return conversation if isinstance(conversation, dict) else {}
+
     async def _handle_hello(self, ws, msg: dict[str, Any]) -> None:
         """Process a hello handshake, register device, and send hello_ack."""
         device_id = msg["device_id"]
         payload: dict[str, Any] = msg.get("payload", {})
+        requested_conversation = payload.get("conversation") if isinstance(payload.get("conversation"), dict) else {}
         session_id = f"sess_{secrets.token_hex(8)}"
 
         # Mark this device online BEFORE closing the old WebSocket.
@@ -218,16 +229,43 @@ class DATPServer:
         # TODO (Step 3+): resume_token support.
         #   If resume_token is provided, look up the previous session and
         #   restore state rather than starting fresh.
+        available_backend_ids = {str(item.get("id")) for item in self.available_backends if isinstance(item, dict) and item.get("id")}
+        requested_backend = requested_conversation.get("backend_id")
+        selected_backend = requested_backend if requested_backend in available_backend_ids else self.default_backend_id
+        available_agent_ids = {str(agent.get("id")) for agent in self.available_agents if isinstance(agent, dict) and agent.get("id")}
+        requested_agent_id = requested_conversation.get("agent_id")
+        default_agent_id = (self.default_agent or {}).get("id")
+        selected_agent_id = requested_agent_id if requested_agent_id in available_agent_ids else default_agent_id
+        selected_agent = next(
+            (agent for agent in self.available_agents if isinstance(agent, dict) and agent.get("id") == selected_agent_id),
+            self.default_agent,
+        )
+        selected_session_key = requested_conversation.get("session_key") or f"oi:device:{device_id}"
+
         entry: DeviceEntry = {
             "ws": ws,
             "session_id": session_id,
             "capabilities": payload.get("capabilities", {}),
             "resume_token": payload.get("resume_token"),
             "nonce": payload.get("nonce"),
+            "conversation": {
+                "backend_id": selected_backend,
+                "agent_id": selected_agent_id,
+                "session_key": selected_session_key,
+            },
         }
         self.device_registry[device_id] = entry
 
-        ack = build_hello_ack(session_id=session_id, device_id=device_id)
+        ack = build_hello_ack(
+            session_id=session_id,
+            device_id=device_id,
+            default_agent=self.default_agent,
+            available_agents=self.available_agents,
+            available_backends=self.available_backends,
+            selected_backend=selected_backend,
+            selected_agent=selected_agent,
+            selected_session_key=selected_session_key,
+        )
         await ws.send(json.dumps(ack))
         logger.info("device registered: device_id=%r session_id=%r", device_id, session_id)
 

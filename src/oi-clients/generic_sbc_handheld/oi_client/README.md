@@ -66,6 +66,9 @@ python3 -m oi_client
 - `volume`: `0`-`100`
 - `led_enabled`: `true` or `false`
 - `mute_duration_hours`: `1`, `8`, or `24`
+- `backend_id`: selected gateway backend profile id
+- `agent_id`: selected agent id
+- `session_key`: selected conversation session key
 
 Changes made in the Settings menu are persisted automatically to `config.json`.
 
@@ -108,7 +111,7 @@ The client now also sends periodic DATP `state` reports with any discoverable ba
 
 - `Surprise me ✨` home prompt that cycles through whimsical requests
 - `About Gateway` menu card showing `hello_ack` metadata like server name/session/agents
-- Settings menu now includes brightness, volume, LED, mute duration, diagnostics, and a small system submenu
+- Settings menu now includes brightness, volume, LED, mute duration, a Connection submenu (backend / agent / session), diagnostics, and a small system submenu
 - secret button-code easter egg for Blob Party mode
 - playful connecting/waiting/response quips on-device
 

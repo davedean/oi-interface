@@ -1,7 +1,7 @@
 """Channel: assemble channel messages and send to agent backends."""
 from .backend import AgentBackend, AgentBackendError, AgentRequest, AgentResponse
 from .codex_backend import CodexBackend
-from .factory import create_backend_from_env
+from .factory import BackendCatalog, create_backend_catalog_from_env, create_backend_from_env
 from .hermes_backend import HermesBackend
 from .openclaw_backend import OpenClawBackend
 from .opencode_backend import OpenCodeBackend
@@ -15,7 +15,9 @@ __all__ = [
     "AgentRequest",
     "AgentResponse",
     "CodexBackend",
+    "BackendCatalog",
     "ChannelService",
+    "create_backend_catalog_from_env",
     "create_backend_from_env",
     "HermesBackend",
     "OpenClawBackend",

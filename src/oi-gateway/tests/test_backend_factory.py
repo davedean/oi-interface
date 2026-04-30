@@ -7,7 +7,7 @@ import pytest
 gateway_src = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(gateway_src))
 
-from channel.factory import create_backend_from_env
+from channel.factory import create_backend_catalog_from_env, create_backend_from_env
 from channel.codex_backend import CodexBackend
 from channel.hermes_backend import HermesBackend
 from channel.openclaw_backend import OpenClawBackend
@@ -111,6 +111,21 @@ def test_factory_builds_codex_backend(monkeypatch):
     assert isinstance(backend, CodexBackend)
     assert backend.command == ["codex", "exec", "--json", "-m", "gpt-5"]
     assert backend.timeout_seconds == 150.0
+
+
+def test_factory_builds_catalog_from_json(monkeypatch):
+    monkeypatch.setenv(
+        "OI_AGENT_BACKENDS_JSON",
+        '[{"id":"pi-fast","backend":"pi","label":"Pi Fast","command":"pi --mode rpc --no-session"},{"id":"codex-main","backend":"codex","command":"codex exec --json -m gpt-5"}]',
+    )
+    monkeypatch.setenv("OI_DEFAULT_AGENT_BACKEND_ID", "codex-main")
+
+    catalog = create_backend_catalog_from_env()
+
+    assert catalog.default_backend_id == "codex-main"
+    assert [item["id"] for item in catalog.available_backends()] == ["pi-fast", "codex-main"]
+    assert isinstance(catalog.get("pi-fast"), SubprocessPiBackend)
+    assert isinstance(catalog.get("codex-main"), CodexBackend)
 
 
 def test_factory_raises_for_unknown_backend(monkeypatch):

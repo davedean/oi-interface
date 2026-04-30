@@ -83,9 +83,24 @@ def format_gateway_about(server_info: dict[str, Any] | None) -> list[str]:
         f"Session: {payload.get('session_id') or 'n/a'}",
         f"Protocol: {payload.get('accepted_protocol') or 'datp'}",
     ]
-    default_agent = payload.get("default_agent") or {}
-    if isinstance(default_agent, dict) and default_agent.get("name"):
-        lines.append(f"Agent: {default_agent['name']}")
+    selected_backend = payload.get("selected_backend")
+    if selected_backend:
+        lines.append(f"Backend: {selected_backend}")
+    selected_agent = payload.get("selected_agent") or payload.get("default_agent") or {}
+    if isinstance(selected_agent, dict) and (selected_agent.get("name") or selected_agent.get("id")):
+        lines.append(f"Agent: {selected_agent.get('name') or selected_agent.get('id')}")
+    selected_session_key = payload.get("selected_session_key")
+    if selected_session_key:
+        lines.append(f"Chat: {selected_session_key}")
+    available_backends = payload.get("available_backends") or []
+    if isinstance(available_backends, list) and available_backends:
+        names = []
+        for backend in available_backends[:4]:
+            if isinstance(backend, dict):
+                names.append(backend.get("name") or backend.get("id") or "backend")
+            else:
+                names.append(str(backend))
+        lines.append("Backends: " + ", ".join(names))
     available_agents = payload.get("available_agents") or []
     if isinstance(available_agents, list) and available_agents:
         names = []

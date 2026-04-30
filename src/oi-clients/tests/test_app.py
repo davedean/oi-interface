@@ -316,15 +316,37 @@ async def test_menu_device_settings_and_show_progress_toggle(app: HandheldApp) -
 
 
 @pytest.mark.asyncio
-async def test_settings_diagnostics_and_system_menu(app: HandheldApp) -> None:
+async def test_settings_diagnostics_connection_and_system_menu(app: HandheldApp) -> None:
     app._online = True
+    app.datp = SimpleNamespace(
+        reconnect=AsyncMock(return_value=True),
+        update_conversation=lambda **kwargs: None,
+        server_info={
+            "payload": {
+                "available_backends": [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}],
+                "available_agents": [{"id": "main", "name": "Main"}, {"id": "build", "name": "Build"}],
+            }
+        },
+        is_connected=True,
+    )
     app._ui_mode = UIMode.HOME
     await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
 
     app._menu_idx = app._menu_items().index("Diagnostics")
     await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
     assert app._card.title == "Diagnostics"
-    assert "brightness:" in app._card.body
+    assert "backend:" in app._card.body
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "settings"
+    app._menu_idx = app._menu_items().index("Connection")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._menu_mode == "connection"
+
+    app._menu_idx = app._menu_items().index("Backend")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._preferred_backend_id == "pi"
+    app.datp.reconnect.assert_awaited()
 
     app._ui_mode = UIMode.MENU
     app._menu_mode = "settings"

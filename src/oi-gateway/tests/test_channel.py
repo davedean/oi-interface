@@ -12,7 +12,8 @@ import sys
 gateway_src = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(gateway_src))
 
-from channel import ChannelService, PiBackendError, StubPiBackend
+from channel import BackendCatalog, ChannelService, PiBackendError, StubPiBackend
+from channel.factory import BackendProfile
 from channel.backend import AgentResponse, AgentStreamChunk
 from channel.request_builder import build_agent_request_from_transcript, render_text_prompt
 from datp import EventBus
@@ -78,6 +79,50 @@ def stub_device():
         audio_cache_bytes=0,
         muted_until=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_channel_service_uses_conversation_backend_and_agent(event_bus, stub_device):
+    received = []
+
+    def handler(event_type, device_id, payload):
+        if event_type == "agent_response":
+            received.append((device_id, payload))
+
+    event_bus.subscribe(handler)
+    registry = StubRegistry(devices=[stub_device], foreground=stub_device)
+    pi_backend = StubPiBackend(response="from pi")
+    codex_backend = StubPiBackend(response="from codex")
+    catalog = BackendCatalog(
+        [
+            BackendProfile(id="pi", label="Pi", backend=pi_backend),
+            BackendProfile(id="codex", label="Codex", backend=codex_backend),
+        ],
+        default_backend_id="pi",
+    )
+    ChannelService(
+        event_bus=event_bus,
+        registry=registry,
+        pi_backend=pi_backend,
+        backend_catalog=catalog,
+        conversation_resolver=lambda device_id: {
+            "backend_id": "codex",
+            "agent_id": "build",
+            "session_key": "oi:session:xyz",
+        },
+    )
+
+    event_bus.emit("event", "test-device", {"event": "text.prompt", "text": "hello"})
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert pi_backend.call_count == 0
+    assert codex_backend.call_count == 1
+    assert codex_backend.last_request is not None
+    assert codex_backend.last_request.backend_id == "codex"
+    assert codex_backend.last_request.agent_id == "build"
+    assert codex_backend.last_request.session_key == "oi:session:xyz"
+    assert received and received[0][0] == "test-device"
 
 
 # ------------------------------------------------------------------

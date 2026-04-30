@@ -80,6 +80,10 @@ HELLO_PAYLOAD = {
         "nonce": {
             "type": "string",
             "description": "Nonce for replay prevention (optional)"
+        },
+        "conversation": {
+            "type": "object",
+            "description": "Conversation routing preferences (optional)"
         }
     }
 }
@@ -129,6 +133,22 @@ HELLO_ACK_PAYLOAD = {
         "available_agents": {
             "type": "array",
             "description": "List of available agents (optional)"
+        },
+        "available_backends": {
+            "type": "array",
+            "description": "List of available backend profiles (optional)"
+        },
+        "selected_backend": {
+            "type": "string",
+            "description": "Selected backend profile id (optional)"
+        },
+        "selected_agent": {
+            "type": "object",
+            "description": "Selected agent configuration (optional)"
+        },
+        "selected_session_key": {
+            "type": "string",
+            "description": "Selected conversation session key (optional)"
         },
         "server_capabilities": {
             "type": "object",

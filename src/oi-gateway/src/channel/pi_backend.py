@@ -47,7 +47,7 @@ class SubprocessPiBackend(AgentBackend):
 
     async def send_request(self, request: AgentRequest) -> AgentResponse:
         message = render_text_prompt(request)
-        response_text = await self.send_prompt(message)
+        response_text = await self.send_prompt(message, agent_id=request.agent_id)
         return AgentResponse(
             response_text=response_text,
             backend_name=self.name,
@@ -55,19 +55,22 @@ class SubprocessPiBackend(AgentBackend):
             correlation_id=request.correlation_id,
         )
 
-    async def _read_events_from_prompt(self, message: str) -> AsyncGenerator[AgentStreamChunk, None]:
+    async def _read_events_from_prompt(self, message: str, agent_id: str | None = None) -> AsyncGenerator[AgentStreamChunk, None]:
         """Read events from pi subprocess as an async generator yielding AgentStreamChunk."""
+        command = list(self._pi_command)
+        if agent_id:
+            command.extend(["--agent", agent_id])
         logger.debug(
             "starting pi subprocess prompt",
             extra={
                 "backend_mode": self.mode,
-                "pi_command": self._pi_command,
+                "pi_command": command,
                 "timeout_seconds": self._timeout_seconds,
                 "message_len": len(message),
             },
         )
         proc = await asyncio.create_subprocess_exec(
-            *self._pi_command,
+            *command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -113,11 +116,11 @@ class SubprocessPiBackend(AgentBackend):
                 metadata={"event_type": "complete"},
             )
 
-    async def send_prompt(self, message: str) -> str:
+    async def send_prompt(self, message: str, agent_id: str | None = None) -> str:
         """Backward-compatible helper for tests and legacy callers."""
         response_text = ""
         got_any = False
-        async for chunk in self._read_events_from_prompt(message):
+        async for chunk in self._read_events_from_prompt(message, agent_id=agent_id):
             if chunk.text_delta:
                 if chunk.is_final:
                     response_text = chunk.text_delta
@@ -133,7 +136,7 @@ class SubprocessPiBackend(AgentBackend):
     async def send_request_streaming(self, request: AgentRequest) -> AsyncGenerator[AgentStreamChunk, None]:
         """Send a request and yield streaming text chunks."""
         message = render_text_prompt(request)
-        async for chunk in self._read_events_from_prompt(message):
+        async for chunk in self._read_events_from_prompt(message, agent_id=request.agent_id):
             yield chunk
 
     async def _write_prompt(self, proc: asyncio.subprocess.Process, message: str) -> None:

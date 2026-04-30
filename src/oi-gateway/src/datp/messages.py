@@ -92,6 +92,7 @@ def build_hello(
     state: dict[str, Any] | None = None,
     resume_token: str | None = None,
     nonce: str | None = None,
+    conversation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a hello message for a device to send to the gateway.
 
@@ -119,6 +120,8 @@ def build_hello(
         payload["resume_token"] = resume_token
     if nonce:
         payload["nonce"] = nonce
+    if conversation:
+        payload["conversation"] = conversation
     
     return {
         "v": DATP_VERSION,
@@ -137,6 +140,10 @@ def build_hello_ack(
     server_name: str = "Home Oi",
     default_agent: dict[str, Any] | None = None,
     available_agents: list[dict[str, Any]] | None = None,
+    available_backends: list[dict[str, Any]] | None = None,
+    selected_backend: str | None = None,
+    selected_agent: dict[str, Any] | None = None,
+    selected_session_key: str | None = None,
     server_capabilities: dict[str, Any] | None = None,
     policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -170,6 +177,14 @@ def build_hello_ack(
         payload["default_agent"] = default_agent
     if available_agents:
         payload["available_agents"] = available_agents
+    if available_backends:
+        payload["available_backends"] = available_backends
+    if selected_backend:
+        payload["selected_backend"] = selected_backend
+    if selected_agent:
+        payload["selected_agent"] = selected_agent
+    if selected_session_key:
+        payload["selected_session_key"] = selected_session_key
     if server_capabilities:
         payload["server_capabilities"] = server_capabilities
     if policy:

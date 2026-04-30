@@ -132,6 +132,33 @@ async def test_hello_handshake(server):
 
 
 @pytest.mark.asyncio
+async def test_hello_handshake_includes_conversation_preferences(server):
+    hello = make_hello("test-device-conversation")
+    hello["payload"]["conversation"] = {
+        "backend_id": "codex",
+        "agent_id": "build",
+        "session_key": "oi:session:test123",
+    }
+    server.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent, {"id": "build", "name": "Build"}]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws:
+        await ws.send(json.dumps(hello))
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        payload = resp["payload"]
+        assert payload["selected_backend"] == "codex"
+        assert payload["selected_agent"]["id"] == "build"
+        assert payload["selected_session_key"] == "oi:session:test123"
+        assert server.get_device_conversation("test-device-conversation") == {
+            "backend_id": "codex",
+            "agent_id": "build",
+            "session_key": "oi:session:test123",
+        }
+
+
+@pytest.mark.asyncio
 async def test_event_emit(server):
     """Connect, subscribe to event bus, send an event, assert callback was called."""
     received: list[tuple[str, str, dict]] = []

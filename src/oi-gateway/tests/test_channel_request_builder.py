@@ -74,6 +74,21 @@ def test_build_agent_request_from_text_prompt_populates_fields():
     assert request.reply_constraints == {"max_spoken_seconds": 12}
 
 
+def test_build_agent_request_overrides_backend_agent_and_session():
+    request = build_agent_request_from_text_prompt(
+        device_id="test-device",
+        text="hello",
+        device_context={"source_device": "test-device", "foreground": None, "online": [], "capabilities": {}},
+        session_key="oi:session:abc",
+        backend_id="codex-main",
+        agent_id="build",
+    )
+
+    assert request.session_key == "oi:session:abc"
+    assert request.backend_id == "codex-main"
+    assert request.agent_id == "build"
+
+
 @pytest.mark.parametrize(
     ("agent_request", "expected"),
     [

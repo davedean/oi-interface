@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -21,7 +22,8 @@ from audio import (
     StubSttBackend,
 )
 from text import TextDeliveryPipeline
-from channel import AgentBackend, ChannelService, create_backend_from_env
+from channel import AgentBackend, BackendCatalog, ChannelService, create_backend_catalog_from_env
+from channel.factory import BackendProfile
 from config_loader import load_gateway_toml_config
 from character_packs import CharacterPackStore, CharacterRendererService
 from datp import EventBus
@@ -31,6 +33,32 @@ from registry import RegistryService
 from registry.store import DeviceStore
 
 logger = logging.getLogger(__name__)
+
+
+def _load_agent_catalog() -> tuple[dict[str, str] | None, list[dict[str, str]]]:
+    raw = os.getenv("OI_AVAILABLE_AGENTS_JSON", "").strip()
+    if not raw:
+        default_id = os.getenv("OI_DEFAULT_AGENT_ID", "main").strip() or "main"
+        label = os.getenv("OI_DEFAULT_AGENT_NAME", default_id).strip() or default_id
+        agent = {"id": default_id, "name": label}
+        return agent, [agent]
+
+    data = json.loads(raw)
+    if not isinstance(data, list) or not data:
+        raise ValueError("OI_AVAILABLE_AGENTS_JSON must be a non-empty JSON array")
+    agents: list[dict[str, str]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("id") or item.get("name") or "").strip()
+        if not agent_id:
+            continue
+        agents.append({"id": agent_id, "name": str(item.get("name") or agent_id)})
+    if not agents:
+        raise ValueError("OI_AVAILABLE_AGENTS_JSON contained no usable agents")
+    default_id = str(os.getenv("OI_DEFAULT_AGENT_ID") or agents[0]["id"])
+    default_agent = next((agent for agent in agents if agent["id"] == default_id), agents[0])
+    return default_agent, agents
 
 
 def _build_tts_backend() -> object:
@@ -118,6 +146,9 @@ class GatewayRuntime:
     """Owns the running gateway components and their lifecycle."""
 
     agent_backend: AgentBackend
+    backend_catalog: BackendCatalog | None = None
+    default_agent: dict[str, str] | None = None
+    available_agents: list[dict[str, str]] | None = None
     datp_host: str = "0.0.0.0"
     datp_port: int = 8787
     api_host: str = "0.0.0.0"
@@ -129,11 +160,23 @@ class GatewayRuntime:
         self.event_bus = EventBus()
         self.store = DeviceStore()
         self.registry = RegistryService(store=self.store, event_bus=self.event_bus)
+        catalog = self.backend_catalog
+        if catalog is None:
+            catalog = BackendCatalog(
+                [BackendProfile(id=getattr(self.agent_backend, "name", "pi"), label=str(getattr(self.agent_backend, "name", "pi")).title(), backend=self.agent_backend)],
+                default_backend_id=str(getattr(self.agent_backend, "name", "pi")),
+            )
+            self.backend_catalog = catalog
+
         self.server = DATPServer(
             host=self.datp_host,
             port=self.datp_port,
             event_bus=self.event_bus,
             registry=self.registry,
+            available_backends=catalog.available_backends(),
+            default_backend_id=catalog.default_backend_id,
+            default_agent=self.default_agent,
+            available_agents=self.available_agents or [],
         )
         self.dispatcher = CommandDispatcher(self.server)
         self.channel_service = ChannelService(
@@ -141,6 +184,8 @@ class GatewayRuntime:
             registry=self.registry,
             pi_backend=self.agent_backend,
             command_dispatcher=self.dispatcher,
+            backend_catalog=self.backend_catalog,
+            conversation_resolver=self.server.get_device_conversation,
         )
         self.audio_delivery = AudioDeliveryPipeline(
             event_bus=self.event_bus,
@@ -220,9 +265,14 @@ async def main() -> None:
     logger.info("Gateway python executable: %s", sys.executable)
     logger.info("Gateway python version: %s", sys.version.split()[0])
     logger.info("OI_AGENT_BACKEND=%s OI_TTS_BACKEND=%s", os.getenv("OI_AGENT_BACKEND", "pi"), os.getenv("OI_TTS_BACKEND", "openai"))
-    backend = create_backend_from_env()
+    catalog = create_backend_catalog_from_env()
+    default_backend = catalog.get(catalog.default_backend_id)
+    default_agent, available_agents = _load_agent_catalog()
     runtime = GatewayRuntime(
-        agent_backend=backend,
+        agent_backend=default_backend,
+        backend_catalog=catalog,
+        default_agent=default_agent,
+        available_agents=available_agents,
         datp_host=os.getenv("OI_GATEWAY_HOST", "0.0.0.0"),
         datp_port=int(os.getenv("OI_GATEWAY_PORT", "8787")),
         api_host=os.getenv("OI_GATEWAY_API_HOST", "0.0.0.0"),

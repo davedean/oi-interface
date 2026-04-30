@@ -179,6 +179,9 @@ class HandheldApp:
         volume: int = 80,
         led_enabled: bool = True,
         mute_duration_hours: int = 24,
+        backend_id: str | None = None,
+        agent_id: str | None = None,
+        session_key: str | None = None,
         settings_persist: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         self.gateway_url = gateway_url
@@ -231,10 +234,12 @@ class HandheldApp:
             "Mute",
             "Show Progress",
             "Show Celebrations",
+            "Connection",
             "Diagnostics",
             "System",
             "Back",
         ]
+        self._menu_connection_items = ["Backend", "Agent", "Session", "Reconnect Now", "Back"]
         self._menu_system_items = ["Reboot", "Shutdown", "Back"]
 
         # Delight / easter eggs
@@ -258,6 +263,9 @@ class HandheldApp:
             size_value = "small"
         self._character_size = size_value if size_value in {"big", "small"} else "big"
         self._settings_persist = settings_persist
+        self._preferred_backend_id = backend_id
+        self._preferred_agent_id = agent_id
+        self._preferred_session_key = session_key or f"oi:device:{device_id}"
         self._mute_duration_hours = _coerce_int(mute_duration_hours, 24)
         if self._mute_duration_hours not in _MUTE_DURATION_PRESETS:
             self._mute_duration_hours = 24
@@ -364,9 +372,13 @@ class HandheldApp:
             device_id=self.device_id,
             device_type=self.device_type,
             capabilities=capabilities,
+            backend_id=self._preferred_backend_id,
+            agent_id=self._preferred_agent_id,
+            session_key=self._preferred_session_key,
         )
         connected = await self.datp.connect()
         if connected:
+            self._sync_connection_preferences_from_server()
             self._online = True
             self._ui_mode = UIMode.READY
             self._card.body = "Select a prompt"
@@ -605,6 +617,8 @@ class HandheldApp:
                 self._ui_mode = UIMode.CONNECTING
                 if self.datp:
                     ok = await self.datp.reconnect()
+                    if ok:
+                        self._sync_connection_preferences_from_server()
                     self._online = ok
                     self._ui_mode = UIMode.READY if ok else UIMode.ERROR
             elif ev.name == "b":
@@ -623,6 +637,105 @@ class HandheldApp:
     def _mute_duration_label(self) -> str:
         return f"{self._mute_duration_hours}h"
 
+    def _available_backends(self) -> list[dict[str, str]]:
+        payload = self.datp.server_info.get("payload", {}) if self.datp and self.datp.server_info else {}
+        items = payload.get("available_backends") if isinstance(payload, dict) else []
+        return [item for item in items if isinstance(item, dict) and item.get("id")]
+
+    def _available_agents(self) -> list[dict[str, str]]:
+        payload = self.datp.server_info.get("payload", {}) if self.datp and self.datp.server_info else {}
+        items = payload.get("available_agents") if isinstance(payload, dict) else []
+        return [item for item in items if isinstance(item, dict) and (item.get("id") or item.get("name"))]
+
+    def _current_backend_label(self) -> str:
+        current = self._preferred_backend_id
+        for item in self._available_backends():
+            if item.get("id") == current:
+                return str(item.get("name") or current)
+        return current or "default"
+
+    def _current_agent_label(self) -> str:
+        current = self._preferred_agent_id
+        for item in self._available_agents():
+            item_id = str(item.get("id") or item.get("name"))
+            if item_id == current:
+                return str(item.get("name") or item_id)
+        return current or "default"
+
+    def _current_session_label(self) -> str:
+        value = self._preferred_session_key or f"oi:device:{self.device_id}"
+        if value == f"oi:device:{self.device_id}":
+            return "device"
+        return value.replace("oi:session:", "session:")
+
+    async def _apply_connection_preferences(self, *, reconnect: bool = True) -> bool:
+        if self.datp:
+            self.datp.update_conversation(
+                backend_id=self._preferred_backend_id,
+                agent_id=self._preferred_agent_id,
+                session_key=self._preferred_session_key,
+            )
+        self._persist_settings()
+        if reconnect and self.datp:
+            self._ui_mode = UIMode.CONNECTING
+            ok = await self.datp.reconnect()
+            if ok:
+                self._sync_connection_preferences_from_server()
+            self._online = ok
+            self._ui_mode = UIMode.READY if ok else UIMode.ERROR
+            if ok:
+                self._card.body = "Connection updated"
+            return ok
+        return True
+
+    def _cycle_backend(self) -> str:
+        backends = self._available_backends()
+        if not backends:
+            return self._preferred_backend_id or "default"
+        ids = [str(item["id"]) for item in backends]
+        if not self._preferred_backend_id or self._preferred_backend_id not in ids:
+            self._preferred_backend_id = ids[0]
+            return self._current_backend_label()
+        next_id = ids[(ids.index(self._preferred_backend_id) + 1) % len(ids)]
+        self._preferred_backend_id = next_id
+        return self._current_backend_label()
+
+    def _cycle_agent(self) -> str:
+        agents = self._available_agents()
+        if not agents:
+            return self._preferred_agent_id or "default"
+        ids = [str(item.get("id") or item.get("name")) for item in agents]
+        if not self._preferred_agent_id or self._preferred_agent_id not in ids:
+            self._preferred_agent_id = ids[0]
+            return self._current_agent_label()
+        next_id = ids[(ids.index(self._preferred_agent_id) + 1) % len(ids)]
+        self._preferred_agent_id = next_id
+        return self._current_agent_label()
+
+    def _cycle_session(self) -> str:
+        default_session = f"oi:device:{self.device_id}"
+        current = self._preferred_session_key or default_session
+        if current == default_session:
+            self._preferred_session_key = f"oi:session:{uuid.uuid4().hex[:8]}"
+        else:
+            self._preferred_session_key = default_session
+        return self._current_session_label()
+
+    def _sync_connection_preferences_from_server(self) -> None:
+        server_info = getattr(self.datp, "server_info", None) if self.datp else None
+        payload = server_info.get("payload", {}) if isinstance(server_info, dict) else {}
+        if not isinstance(payload, dict):
+            return
+        if payload.get("selected_backend"):
+            self._preferred_backend_id = str(payload["selected_backend"])
+        selected_agent = payload.get("selected_agent")
+        if isinstance(selected_agent, dict) and (selected_agent.get("id") or selected_agent.get("name")):
+            self._preferred_agent_id = str(selected_agent.get("id") or selected_agent.get("name"))
+        elif payload.get("default_agent") and isinstance(payload["default_agent"], dict):
+            self._preferred_agent_id = str(payload["default_agent"].get("id") or payload["default_agent"].get("name") or self._preferred_agent_id)
+        if payload.get("selected_session_key"):
+            self._preferred_session_key = str(payload["selected_session_key"])
+
     def _show_card_message(self, title: str, body: str) -> None:
         self._card.title = title
         self._card.body = body
@@ -638,6 +751,9 @@ class HandheldApp:
         lines = [
             f"online: {'yes' if self._online else 'no'}",
             f"gateway: {self.gateway_url}",
+            f"backend: {self._current_backend_label()}",
+            f"agent: {self._current_agent_label()}",
+            f"session: {self._current_session_label()}",
             f"brightness: {self._brightness_label()} ({self._device_control.brightness})",
             f"volume: {self._device_control.volume}%",
             f"led: {'on' if self._device_control.led_enabled else 'off'}",
@@ -704,6 +820,9 @@ class HandheldApp:
                     self._celebration_note = ""
                 self._persist_settings()
                 self._show_card_message("Show Celebrations", f"Set to {'on' if self._show_celebrations else 'off'}")
+            elif item == "Connection":
+                self._menu_mode = "connection"
+                self._menu_idx = 0
             elif item == "Diagnostics":
                 self._show_diagnostics()
             elif item == "System":
@@ -725,8 +844,24 @@ class HandheldApp:
                         self._card.title = "Reconnect failed"
                         self._card.body = str(exc)
                         return
+                    if self.datp.is_connected:
+                        self._sync_connection_preferences_from_server()
                     self._online = self.datp.is_connected
                     self._ui_mode = UIMode.READY if self._online else UIMode.ERROR
+            elif item == "Backend":
+                label = self._cycle_backend()
+                if await self._apply_connection_preferences(reconnect=True):
+                    self._show_card_message("Backend", f"Set to {label}")
+            elif item == "Agent":
+                label = self._cycle_agent()
+                if await self._apply_connection_preferences(reconnect=True):
+                    self._show_card_message("Agent", f"Set to {label}")
+            elif item == "Session":
+                label = self._cycle_session()
+                if await self._apply_connection_preferences(reconnect=True):
+                    self._show_card_message("Session", f"Set to {label}")
+            elif item == "Reconnect Now":
+                await self._apply_connection_preferences(reconnect=True)
             elif item == "Reboot":
                 result = self._device_control.apply("device.reboot")
                 self._show_card_message("Reboot", result.message or ("ok" if result.ok else "reboot blocked"))
@@ -734,13 +869,13 @@ class HandheldApp:
                 result = self._device_control.apply("device.shutdown")
                 self._show_card_message("Shutdown", result.message or ("ok" if result.ok else "shutdown blocked"))
             elif item == "Back":
-                if self._menu_mode == "system":
+                if self._menu_mode in {"system", "connection"}:
                     self._menu_mode = "settings"
                 else:
                     self._menu_mode = "main"
                 self._menu_idx = 0
         elif name == "b":
-            if self._menu_mode == "system":
+            if self._menu_mode in {"system", "connection"}:
                 self._menu_mode = "settings"
                 self._menu_idx = 0
             elif self._menu_mode == "settings":
@@ -756,6 +891,8 @@ class HandheldApp:
     def _menu_items(self) -> list[str]:
         if self._menu_mode == "settings":
             return self._menu_settings_items
+        if self._menu_mode == "connection":
+            return self._menu_connection_items
         if self._menu_mode == "system":
             return self._menu_system_items
         return self._menu_main_items
@@ -772,6 +909,9 @@ class HandheldApp:
                 "volume": self._device_control.volume,
                 "led_enabled": self._device_control.led_enabled,
                 "mute_duration_hours": self._mute_duration_hours,
+                "backend_id": self._preferred_backend_id,
+                "agent_id": self._preferred_agent_id,
+                "session_key": self._preferred_session_key,
             })
         except Exception as exc:
             logger.warning("settings persistence failed: %s", exc)
@@ -1095,9 +1235,15 @@ class HandheldApp:
                     lines.append(f"{marker}{item}: {'on' if self._show_progress_messages else 'off'}")
                 elif item == "Show Celebrations":
                     lines.append(f"{marker}{item}: {'on' if self._show_celebrations else 'off'}")
+                elif item == "Backend":
+                    lines.append(f"{marker}{item}: {self._current_backend_label()}")
+                elif item == "Agent":
+                    lines.append(f"{marker}{item}: {self._current_agent_label()}")
+                elif item == "Session":
+                    lines.append(f"{marker}{item}: {self._current_session_label()}")
                 else:
                     lines.append(f"{marker}{item}")
-            menu_title = "Settings" if self._menu_mode == "settings" else "System" if self._menu_mode == "system" else "Menu"
+            menu_title = "Settings" if self._menu_mode == "settings" else "Connection" if self._menu_mode == "connection" else "System" if self._menu_mode == "system" else "Menu"
             self.renderer.draw_card(menu_title, lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.ERROR:

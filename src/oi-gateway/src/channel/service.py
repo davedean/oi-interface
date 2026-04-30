@@ -14,8 +14,11 @@ from .request_builder import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datp import EventBus
     from registry import RegistryService
+
+    from .factory import BackendCatalog
 from datp.commands import CommandDispatcher
 
 logger = logging.getLogger(__name__)
@@ -30,11 +33,15 @@ class ChannelService:
         registry: RegistryService,
         pi_backend: AgentBackend,
         command_dispatcher: CommandDispatcher | None = None,
+        backend_catalog: "BackendCatalog | None" = None,
+        conversation_resolver: "Callable[[str], dict[str, Any]] | None" = None,
     ) -> None:
         self._event_bus = event_bus
         self._registry = registry
         self._pi_backend = pi_backend
         self._command_dispatcher = command_dispatcher
+        self._backend_catalog = backend_catalog
+        self._conversation_resolver = conversation_resolver
         event_bus.subscribe(self._on_event)
         logger.info("ChannelService started", extra={"backend_mode": self._backend_mode})
 
@@ -78,11 +85,15 @@ class ChannelService:
             return
 
         device_context = self._build_device_context(device_id)
+        conversation = self._conversation_for_device(device_id)
         request = build_agent_request_from_transcript(
             device_id=device_id,
             stream_id=stream_id,
             transcript=cleaned,
             device_context=device_context,
+            session_key=conversation.get("session_key"),
+            backend_id=conversation.get("backend_id"),
+            agent_id=conversation.get("agent_id"),
         )
 
         started = time.perf_counter()
@@ -131,10 +142,14 @@ class ChannelService:
             return
 
         device_context = self._build_device_context(device_id)
+        conversation = self._conversation_for_device(device_id)
         request = build_agent_request_from_text_prompt(
             device_id=device_id,
             text=text,
             device_context=device_context,
+            session_key=conversation.get("session_key"),
+            backend_id=conversation.get("backend_id"),
+            agent_id=conversation.get("agent_id"),
         )
 
         started = time.perf_counter()
@@ -220,14 +235,18 @@ class ChannelService:
             len(last_text),
         )
 
-        session_key_mapper = getattr(self._pi_backend, "map_session_key", None)
+        backend = self._backend_for_request(request)
+        session_key_mapper = getattr(backend, "map_session_key", None)
         session_key = request.session_key
         if callable(session_key_mapper):
             session_key = session_key_mapper(request)
 
+        backend_name = getattr(backend, "name", self._backend_name)
+        if callable(backend_name):
+            backend_name = backend_name()
         return AgentResponse(
             response_text=last_text,
-            backend_name=self._backend_name,
+            backend_name=str(backend_name),
             session_key=session_key,
             correlation_id=request.correlation_id,
             streaming_used=True,
@@ -254,7 +273,7 @@ class ChannelService:
             "stream_id": request.stream_id,
             "device_context": request.device_context,
             "reply_constraints": request.reply_constraints,
-            "backend_name": self._backend_name,
+            "backend_name": request.backend_id or self._backend_name,
             "session_key": request.session_key,
             "correlation_id": request.correlation_id,
         }
@@ -283,17 +302,18 @@ class ChannelService:
 
     async def _send_backend_request(self, request: AgentRequest) -> AgentResponse:
         """Send request to backend, using streaming if available."""
-        streaming_method = getattr(self._pi_backend, "send_request_streaming", None)
+        backend = self._backend_for_request(request)
+        streaming_method = getattr(backend, "send_request_streaming", None)
         if callable(streaming_method):
             logger.info("Using STREAMING path for device %s", request.source_device_id)
             return await self._handle_streaming_request(request, streaming_method)
 
         logger.info("Using NON-STREAMING path for device %s", request.source_device_id)
-        send_request = getattr(self._pi_backend, "send_request", None)
+        send_request = getattr(backend, "send_request", None)
         if callable(send_request):
             return await send_request(request)
 
-        send_prompt = getattr(self._pi_backend, "send_prompt", None)
+        send_prompt = getattr(backend, "send_prompt", None)
         if callable(send_prompt):
             try:
                 response_text = await send_prompt(render_text_prompt(request))
@@ -302,7 +322,7 @@ class ChannelService:
             except Exception as exc:  # pragma: no cover - defensive wrapper
                 raise AgentBackendError(str(exc)) from exc
 
-            backend_name = getattr(self._pi_backend, "name", "legacy")
+            backend_name = getattr(backend, "name", "legacy")
             if callable(backend_name):
                 backend_name = backend_name()
 
@@ -330,6 +350,21 @@ class ChannelService:
             "online": [d.device_id for d in online_devices],
             "capabilities": capabilities,
         }
+
+    def _conversation_for_device(self, device_id: str) -> dict[str, Any]:
+        if self._conversation_resolver is None:
+            return {}
+        try:
+            conversation = self._conversation_resolver(device_id)
+        except Exception:
+            logger.exception("conversation_resolver failed for %s", device_id)
+            return {}
+        return conversation if isinstance(conversation, dict) else {}
+
+    def _backend_for_request(self, request: AgentRequest) -> AgentBackend:
+        if self._backend_catalog is None:
+            return self._pi_backend
+        return self._backend_catalog.get(request.backend_id)
 
     @property
     def _backend_name(self) -> str:

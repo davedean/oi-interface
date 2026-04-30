@@ -56,6 +56,9 @@ async def test_connect_sends_hello_and_starts_listener(monkeypatch) -> None:
         device_id="dev1",
         device_type="handheld",
         capabilities={"audio_out": True},
+        backend_id="pi",
+        agent_id="main",
+        session_key="oi:session:test",
     )
 
     connected = await client.connect()
@@ -65,6 +68,11 @@ async def test_connect_sends_hello_and_starts_listener(monkeypatch) -> None:
     assert client._session_id == "sess-1"
     assert ws.sent_messages[0]["type"] == "hello"
     assert ws.sent_messages[0]["payload"]["capabilities"] == {"audio_out": True}
+    assert ws.sent_messages[0]["payload"]["conversation"] == {
+        "backend_id": "pi",
+        "agent_id": "main",
+        "session_key": "oi:session:test",
+    }
 
     await client.disconnect()
 

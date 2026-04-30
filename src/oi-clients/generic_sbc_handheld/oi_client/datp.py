@@ -39,12 +39,18 @@ class DatpClient:
         device_type: str,
         capabilities: dict[str, Any],
         reconnect_backoff: float = 1.0,
+        backend_id: str | None = None,
+        agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> None:
         self.gateway = gateway
         self.device_id = device_id
         self.device_type = device_type
         self.capabilities = capabilities
         self.reconnect_backoff = reconnect_backoff
+        self._backend_id = backend_id
+        self._agent_id = agent_id
+        self._preferred_session_key = session_key
 
         self._ws = None
         self._connected = False
@@ -69,6 +75,25 @@ class DatpClient:
     def server_info(self) -> dict[str, Any] | None:
         return self._server_info
 
+    @property
+    def conversation(self) -> dict[str, str | None]:
+        return {
+            "backend_id": self._backend_id,
+            "agent_id": self._agent_id,
+            "session_key": self._preferred_session_key,
+        }
+
+    def update_conversation(
+        self,
+        *,
+        backend_id: str | None = None,
+        agent_id: str | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        self._backend_id = backend_id
+        self._agent_id = agent_id
+        self._preferred_session_key = session_key
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -84,6 +109,7 @@ class DatpClient:
             print(f"Connection failed: {exc}")
             return False
 
+        conversation = {k: v for k, v in self.conversation.items() if v}
         hello = {
             "v": "datp",
             "type": "hello",
@@ -99,6 +125,7 @@ class DatpClient:
                     "mode": "READY",
                 },
                 "nonce": secrets.token_hex(8),
+                "conversation": conversation,
             },
         }
         await self._ws.send(json.dumps(hello))

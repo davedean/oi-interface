@@ -16,6 +16,9 @@ class CodexBackend(CliBackend):
     def __init__(self, command: list[str] | None = None, timeout_seconds: float = 120.0) -> None:
         super().__init__(command or ["codex", "exec", "--json", "--skip-git-repo-check"], timeout_seconds)
 
+    def _agent_args(self, agent_id: str) -> list[str]:
+        return ["--agent", agent_id]
+
     def _extract_text_from_output(self, output: str) -> str:
         if not output:
             return ""

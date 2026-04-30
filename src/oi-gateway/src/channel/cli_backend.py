@@ -74,7 +74,14 @@ class CliBackend(AgentBackend, ABC):
         )
 
     def _command_args(self, request: AgentRequest) -> list[str]:
-        return [*self._command, render_text_prompt(request)]
+        args = [*self._command]
+        if request.agent_id:
+            args.extend(self._agent_args(request.agent_id))
+        args.append(render_text_prompt(request))
+        return args
+
+    def _agent_args(self, agent_id: str) -> list[str]:
+        return []
 
     @abstractmethod
     def _extract_text_from_output(self, output: str) -> str:

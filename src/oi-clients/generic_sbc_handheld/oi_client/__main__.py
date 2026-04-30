@@ -47,6 +47,9 @@ DEFAULT_CONFIG = {
     "volume": 80,
     "led_enabled": True,
     "mute_duration_hours": 24,
+    "backend_id": None,
+    "agent_id": None,
+    "session_key": None,
 }
 
 
@@ -153,6 +156,9 @@ async def main():
         volume=config_int(config, "volume"),
         led_enabled=bool(config.get("led_enabled", True)),
         mute_duration_hours=config_int(config, "mute_duration_hours"),
+        backend_id=config.get("backend_id"),
+        agent_id=config.get("agent_id"),
+        session_key=config.get("session_key"),
         settings_persist=lambda updates: save_config(config_path, updates),
     )
 

@@ -27,6 +27,9 @@ def build_agent_request_from_transcript(
     stream_id: str | None,
     transcript: str,
     device_context: dict[str, object],
+    session_key: str | None = None,
+    backend_id: str | None = None,
+    agent_id: str | None = None,
 ) -> AgentRequest:
     """Create an AgentRequest from a transcript event."""
     correlation_id = stream_id or f"transcript:{device_id}:{transcript}"
@@ -36,7 +39,9 @@ def build_agent_request_from_transcript(
         input_kind="transcript",
         stream_id=stream_id,
         transcript=transcript,
-        session_key=build_session_key(device_id),
+        session_key=session_key or build_session_key(device_id),
+        backend_id=backend_id,
+        agent_id=agent_id,
         correlation_id=correlation_id,
         idempotency_key=correlation_id,
         device_context=device_context,
@@ -49,6 +54,9 @@ def build_agent_request_from_text_prompt(
     device_id: str,
     text: str,
     device_context: dict[str, object],
+    session_key: str | None = None,
+    backend_id: str | None = None,
+    agent_id: str | None = None,
 ) -> AgentRequest:
     """Create an AgentRequest from a text.prompt event."""
     correlation_id = f"text:{device_id}:{text}"
@@ -57,7 +65,9 @@ def build_agent_request_from_text_prompt(
         source_device_id=device_id,
         input_kind="text_prompt",
         prompt_text=text,
-        session_key=build_session_key(device_id),
+        session_key=session_key or build_session_key(device_id),
+        backend_id=backend_id,
+        agent_id=agent_id,
         correlation_id=correlation_id,
         idempotency_key=correlation_id,
         device_context=device_context,
