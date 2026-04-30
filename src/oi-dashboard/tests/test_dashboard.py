@@ -7,6 +7,7 @@ import json
 import aiohttp
 import pytest
 
+import oi_dashboard.dashboard as dashboard_module
 from oi_dashboard.dashboard import Dashboard
 
 
@@ -90,6 +91,15 @@ class TestIndexEndpoint:
         content = await retry_request(lambda: fetch_text(dashboard, "/"))
         assert "<html" in content.lower() or "<!doctype" in content.lower()
         assert "Dashboard" in content
+
+    async def test_index_falls_back_to_inline_html_when_static_file_missing(self, dashboard, monkeypatch):
+        """Index endpoint should use fallback HTML when the static file is unavailable."""
+        monkeypatch.setattr(dashboard_module, "STATIC_DIR", dashboard_module.STATIC_DIR / "missing-for-test")
+
+        content = await retry_request(lambda: fetch_text(dashboard, "/"))
+
+        assert "<html" in content.lower() or "<!doctype" in content.lower()
+        assert "EventSource('/events')" in content
 
 
 class TestSSEEndpoint:
