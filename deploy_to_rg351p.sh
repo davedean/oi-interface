@@ -102,7 +102,9 @@ have_remote_rsync() {
 
 sync_client_with_rsync() {
     local -a cmd=(
-        rsync -az --delete --itemize-changes
+        rsync -rlptDz --delete --itemize-changes
+        --no-owner --no-group
+        --omit-dir-times
         --exclude='__pycache__/'
         --exclude='*.pyc'
         --exclude='*.pyo'
