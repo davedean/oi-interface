@@ -173,6 +173,18 @@ def print_result(
     print(output)
 
 
+def post_device_command(
+    client: APIClient,
+    device_id: str,
+    command_name: str,
+    body: dict[str, Any],
+    human: bool,
+) -> None:
+    """Send a device command and print its result."""
+    result = client.post(f"/api/devices/{device_id}/commands/{command_name}", body)
+    print_result(result, human, format_human_command)
+
+
 # ------------------------------------------------------------------
 # Commands
 # ------------------------------------------------------------------
@@ -193,20 +205,12 @@ def cmd_show_status(client: APIClient, device_id: str, state: str, label: str | 
     body: dict[str, Any] = {"state": state}
     if label is not None:
         body["label"] = label
-    print_result(
-        client.post(f"/api/devices/{device_id}/commands/show_status", body),
-        human,
-        format_human_command,
-    )
+    post_device_command(client, device_id, "show_status", body, human)
 
 
 def cmd_mute(client: APIClient, device_id: str, minutes: int, human: bool) -> None:
     """Mute a device for a given number of minutes."""
-    print_result(
-        client.post(f"/api/devices/{device_id}/commands/mute_until", {"minutes": minutes}),
-        human,
-        format_human_command,
-    )
+    post_device_command(client, device_id, "mute_until", {"minutes": minutes}, human)
 
 
 def cmd_route(client: APIClient, device_id: str, text: str, human: bool) -> None:
@@ -223,11 +227,7 @@ def cmd_audio_play(client: APIClient, device_id: str, response_id: str | None, h
     body: dict[str, Any] = {}
     if response_id is not None:
         body["response_id"] = response_id
-    print_result(
-        client.post(f"/api/devices/{device_id}/commands/audio_play", body),
-        human,
-        format_human_command,
-    )
+    post_device_command(client, device_id, "audio_play", body, human)
 
 
 # ------------------------------------------------------------------
