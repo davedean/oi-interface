@@ -19,6 +19,7 @@ SUITES = [
     ROOT / "src" / "oi-gateway",
     ROOT / "src" / "oi-sim",
     ROOT / "src" / "oi-dashboard",
+    ROOT / "src" / "oi-clients",
 ]
 
 

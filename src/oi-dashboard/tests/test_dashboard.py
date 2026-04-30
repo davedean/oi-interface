@@ -51,35 +51,35 @@ async def retry_request(coro, max_attempts=15, delay=0.2):
 
 
 class TestHealthEndpoint:
-    async def test_health_proxies_to_gateway(self, dashboard):
-        """Health endpoint should proxy to gateway API."""
+    async def test_health_proxies_gateway_errors_as_502(self, dashboard):
+        """Health endpoint should surface unreachable gateway as a 502 JSON error."""
         import aiohttp
-        
+
         async def make_request():
             url = f"http://{dashboard._host}:{dashboard._port}/api/health"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    return await resp.json()
-        
-        # Should get either an error (gateway unreachable) or status
-        data = await retry_request(make_request)
-        assert "error" in data or "status" in data
+                    return resp.status, await resp.json()
+
+        status, data = await retry_request(make_request)
+        assert status == 502
+        assert "error" in data
 
 
 class TestDevicesEndpoint:
-    async def test_devices_endpoint_works(self, dashboard):
-        """Devices endpoint should respond (either device list or error)."""
+    async def test_devices_endpoint_surfaces_gateway_errors_as_502(self, dashboard):
+        """Devices endpoint should surface unreachable gateway as a 502 JSON error."""
         import aiohttp
-        
+
         async def make_request():
             url = f"http://{dashboard._host}:{dashboard._port}/api/devices"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    return await resp.json()
-        
-        data = await retry_request(make_request)
-        # Should return either devices list (when gateway is up) or error (when gateway is down)
-        assert "devices" in data or "error" in data
+                    return resp.status, await resp.json()
+
+        status, data = await retry_request(make_request)
+        assert status == 502
+        assert "error" in data
 
 
 class TestTranscriptsEndpoint:

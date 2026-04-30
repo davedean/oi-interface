@@ -210,10 +210,20 @@ class CharacterPackStore:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.executescript(_CHARACTER_PACKS_SCHEMA)
         self._conn.commit()
+        self._closed = False
 
     def close(self) -> None:
         """Close the database connection."""
+        if self._closed:
+            return
         self._conn.close()
+        self._closed = True
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def upsert_pack(self, pack: CharacterPack) -> None:
         """Insert or replace a character pack."""

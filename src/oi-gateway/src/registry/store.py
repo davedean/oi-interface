@@ -132,6 +132,7 @@ class DeviceStore:
         self._conn.commit()
         self._migrate_schema()  # Add missing columns for backward compatibility
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="oi-db-")
+        self._closed = False
 
     def _run(self, fn, *args, **kwargs):
         """Run a blocking function in the thread pool to avoid blocking the event loop."""
@@ -140,8 +141,17 @@ class DeviceStore:
 
     def close(self) -> None:
         """Shut down the executor and close the database connection."""
+        if self._closed:
+            return
         self._executor.shutdown(wait=True)
         self._conn.close()
+        self._closed = True
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def __enter__(self) -> "DeviceStore":
         return self

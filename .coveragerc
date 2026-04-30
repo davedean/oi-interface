@@ -6,6 +6,7 @@ omit =
     */src/oi-sim/src/sim/repl.py
     */src/oi-sim/src/sim/streaming_repl.py
     */src/oi-sim/src/sim/fixtures.py
+    */src/oi-clients/generic_sbc_handheld/oi_client/lib/websockets/*
 
 [report]
 show_missing = True

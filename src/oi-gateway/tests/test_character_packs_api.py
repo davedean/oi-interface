@@ -63,7 +63,8 @@ async def pack_service(tmp_path):
     for pack in BuiltInPacks.list():
         service.register_pack(pack)
 
-    return service
+    yield service
+    store.close()
 
 
 @pytest.fixture

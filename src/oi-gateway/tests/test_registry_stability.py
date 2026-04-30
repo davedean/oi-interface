@@ -37,7 +37,9 @@ def tmp_db(tmp_path):
 @pytest.fixture
 def store(tmp_db):
     """Provide a DeviceStore backed by a temporary DB."""
-    return DeviceStore(tmp_db)
+    store = DeviceStore(tmp_db)
+    yield store
+    store.close()
 
 
 @pytest.fixture
