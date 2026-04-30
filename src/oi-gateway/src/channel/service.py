@@ -203,8 +203,7 @@ class ChannelService:
                 self._emit_stream_progress(request, progress_text)
 
             if chunk.text_delta or chunk.is_final:
-                if chunk.text_delta:
-                    last_text = chunk.text_delta if chunk.is_final else last_text + chunk.text_delta
+                last_text = self._accumulate_stream_text(last_text, chunk)
                 logger.debug(
                     "Emitting delta: device=%s seq=%d final=%s text=%r",
                     request.source_device_id,
@@ -221,21 +220,34 @@ class ChannelService:
             len(last_text),
         )
 
+        session_key_mapper = getattr(self._pi_backend, "map_session_key", None)
+        session_key = request.session_key
+        if callable(session_key_mapper):
+            session_key = session_key_mapper(request)
+
         return AgentResponse(
             response_text=last_text,
             backend_name=self._backend_name,
-            session_key=request.session_key,
+            session_key=session_key,
             correlation_id=request.correlation_id,
             streaming_used=True,
         )
 
+    def _accumulate_stream_text(self, current_text: str, chunk: AgentStreamChunk) -> str:
+        if not chunk.text_delta:
+            return current_text
+        if chunk.is_final:
+            return chunk.text_delta
+        return current_text + chunk.text_delta
+
     def _schedule_handler(self, handler, device_id: str, payload: dict[str, Any], warning_message: str) -> None:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(handler(device_id, payload))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning(warning_message)
             return
 
-        logger.warning(warning_message)
+        loop.create_task(handler(device_id, payload))
 
     def _stream_payload_base(self, request: AgentRequest) -> dict[str, Any]:
         return {

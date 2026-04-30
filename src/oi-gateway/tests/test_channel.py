@@ -13,6 +13,7 @@ gateway_src = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(gateway_src))
 
 from channel import ChannelService, PiBackendError, StubPiBackend
+from channel.backend import AgentResponse, AgentStreamChunk
 from channel.request_builder import build_agent_request_from_transcript, render_text_prompt
 from datp import EventBus
 from registry.models import DeviceInfo
@@ -84,47 +85,38 @@ def stub_device():
 # ------------------------------------------------------------------
 
 
-def test_stub_backend_returns_fixed_response():
+@pytest.mark.asyncio
+async def test_stub_backend_returns_fixed_response():
     """Verify StubPiBackend returns the configured response."""
-
-    async def run():
-        backend = StubPiBackend(response="hello world")
-        result = await backend.send_prompt("test message")
-        assert result == "hello world"
-
-    asyncio.run(run())
+    backend = StubPiBackend(response="hello world")
+    result = await backend.send_prompt("test message")
+    assert result == "hello world"
 
 
-def test_stub_backend_records_last_message():
+@pytest.mark.asyncio
+async def test_stub_backend_records_last_message():
     """Verify StubPiBackend records the last message sent."""
+    backend = StubPiBackend(response="response")
+    assert backend.last_message is None
+    assert backend.call_count == 0
 
-    async def run():
-        backend = StubPiBackend(response="response")
-        assert backend.last_message is None
-        assert backend.call_count == 0
-
-        await backend.send_prompt("first message")
-        assert backend.last_message == "first message"
-        assert backend.call_count == 1
-
-    asyncio.run(run())
+    await backend.send_prompt("first message")
+    assert backend.last_message == "first message"
+    assert backend.call_count == 1
 
 
-def test_stub_backend_multiple_calls():
+@pytest.mark.asyncio
+async def test_stub_backend_multiple_calls():
     """Verify call_count accumulates across multiple calls."""
+    backend = StubPiBackend(response="response")
 
-    async def run():
-        backend = StubPiBackend(response="response")
+    await backend.send_prompt("msg1")
+    assert backend.call_count == 1
+    assert backend.last_message == "msg1"
 
-        await backend.send_prompt("msg1")
-        assert backend.call_count == 1
-        assert backend.last_message == "msg1"
-
-        await backend.send_prompt("msg2")
-        assert backend.call_count == 2
-        assert backend.last_message == "msg2"
-
-    asyncio.run(run())
+    await backend.send_prompt("msg2")
+    assert backend.call_count == 2
+    assert backend.last_message == "msg2"
 
 
 # ------------------------------------------------------------------
@@ -878,6 +870,55 @@ async def test_text_response_delivered_to_device(event_bus, stub_device):
         assert call_args[1]["body"] == "It's 3:14 PM"  # body
         assert call_args[1]["options"] == []  # no options
         print("Non-streaming path used - show_card called")
+
+
+@pytest.mark.asyncio
+async def test_streaming_backend_session_key_mapping_is_preserved(event_bus, stub_device):
+    class MappingStreamingBackend:
+        @property
+        def name(self):
+            return "piclaw"
+
+        def map_session_key(self, request):
+            return f"mapped-{request.session_key}"
+
+        async def send_request_streaming(self, request):
+            yield AgentStreamChunk(text_delta="Hello ", is_final=False, metadata={})
+            yield AgentStreamChunk(text_delta="Hello world", is_final=True, metadata={})
+
+        async def send_request(self, request):
+            return AgentResponse(
+                response_text="Hello world",
+                backend_name=self.name,
+                session_key=self.map_session_key(request),
+                correlation_id=request.correlation_id,
+                streaming_used=True,
+            )
+
+    registry = StubRegistry(devices=[stub_device], foreground=stub_device)
+    backend = MappingStreamingBackend()
+    service = ChannelService(event_bus, registry, backend)
+
+    response_received = None
+
+    def capture_response(event_type, device_id, payload):
+        nonlocal response_received
+        if event_type == "agent_response":
+            response_received = payload
+
+    event_bus.subscribe(capture_response)
+
+    event_bus.emit("event", "test-device", {
+        "event": "text.prompt",
+        "text": "test",
+    })
+
+    await asyncio.sleep(0.1)
+
+    assert response_received is not None
+    assert response_received["response_text"] == "Hello world"
+    assert response_received["session_key"] == "mapped-oi:device:test-device"
+    assert response_received["streaming_used"] is True
 
 
 @pytest.mark.asyncio

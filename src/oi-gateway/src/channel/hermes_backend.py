@@ -42,6 +42,7 @@ class HermesBackend:
                 json=self._build_request_body(request),
             ) as response:
                 await self._raise_for_http_error(response)
+                # Fake responses in tests may only implement .json(); real aiohttp responses stream via .content.
                 if hasattr(response, "content"):
                     async for chunk in self._stream_sse_chunks(response.content):
                         yield chunk
@@ -156,6 +157,9 @@ class HermesBackend:
             if chunk.text_delta:
                 parts.append(chunk.text_delta)
         return "".join(parts)
+
+    def map_session_key(self, request: AgentRequest) -> str | None:
+        return self._map_session_key(request)
 
     def _map_session_key(self, request: AgentRequest) -> str | None:
         if not request.session_key:

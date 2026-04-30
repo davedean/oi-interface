@@ -55,7 +55,7 @@ class SubprocessPiBackend(AgentBackend):
             correlation_id=request.correlation_id,
         )
 
-    async def _read_events_from_prompt(self, message: str):
+    async def _read_events_from_prompt(self, message: str) -> AsyncGenerator[AgentStreamChunk, None]:
         """Read events from pi subprocess as an async generator yielding AgentStreamChunk."""
         logger.debug(
             "starting pi subprocess prompt",

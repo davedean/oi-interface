@@ -62,16 +62,16 @@ async def test_codex_backend_success_failure_timeout_and_empty_text():
     backend = CodexBackend(timeout_seconds=5)
 
     success_stdout = b'{"type":"response.output_text.delta","delta":"Hello "}\n{"type":"text","text":"world"}\n'
-    with patch("channel.codex_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=success_stdout, stderr=b"", returncode=0)):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=success_stdout, stderr=b"", returncode=0)):
         response = await backend.send_request(make_request())
         assert response.response_text == "Hello world"
         assert response.backend_name == "codex"
 
-    with patch("channel.codex_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"", stderr=b"boom", returncode=1)):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"", stderr=b"boom", returncode=1)):
         with pytest.raises(AgentBackendError, match="boom"):
             await backend.send_request(make_request())
 
-    with patch("channel.codex_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b'{"foo":1}\n', stderr=b"", returncode=0)):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b'{"foo":1}\n', stderr=b"", returncode=0)):
         with pytest.raises(AgentBackendError, match="no assistant text"):
             await backend.send_request(make_request())
 
@@ -81,7 +81,7 @@ async def test_codex_backend_success_failure_timeout_and_empty_text():
         coro.close()
         raise asyncio.TimeoutError
 
-    with patch("channel.codex_backend.asyncio.create_subprocess_exec", return_value=proc), patch("channel.codex_backend.asyncio.wait_for", side_effect=fake_wait_for):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=proc), patch("channel.cli_backend.asyncio.wait_for", side_effect=fake_wait_for):
         with pytest.raises(AgentBackendError, match="timed out"):
             await backend.send_request(make_request())
         assert proc.killed is True

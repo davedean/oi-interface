@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -85,17 +84,17 @@ async def test_opencode_backend_success_failure_timeout_and_empty_output():
     backend = OpenCodeBackend.from_command_text("opencode run --fast", timeout_seconds=5)
     assert backend.command == ["opencode", "run", "--fast"]
 
-    with patch("channel.opencode_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"hello\n", stderr=b"", returncode=0)):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"hello\n", stderr=b"", returncode=0)):
         response = await backend.send_request(make_request())
         assert response.response_text == "hello"
         assert response.backend_name == "opencode"
         assert response.raw_response["command"] == ["opencode", "run", "--fast"]
 
-    with patch("channel.opencode_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"", stderr=b"boom", returncode=1)):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"", stderr=b"boom", returncode=1)):
         with pytest.raises(AgentBackendError, match="boom"):
             await backend.send_request(make_request())
 
-    with patch("channel.opencode_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"", stderr=b"", returncode=0)):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=Proc(stdout=b"", stderr=b"", returncode=0)):
         with pytest.raises(AgentBackendError, match="no assistant text"):
             await backend.send_request(make_request())
 
@@ -105,7 +104,7 @@ async def test_opencode_backend_success_failure_timeout_and_empty_output():
         coro.close()
         raise asyncio.TimeoutError
 
-    with patch("channel.opencode_backend.asyncio.create_subprocess_exec", return_value=proc), patch("channel.opencode_backend.asyncio.wait_for", side_effect=fake_wait_for):
+    with patch("channel.cli_backend.asyncio.create_subprocess_exec", return_value=proc), patch("channel.cli_backend.asyncio.wait_for", side_effect=fake_wait_for):
         with pytest.raises(AgentBackendError, match="timed out"):
             await backend.send_request(make_request())
         assert proc.killed is True

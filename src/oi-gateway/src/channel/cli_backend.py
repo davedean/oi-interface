@@ -16,8 +16,8 @@ class CliBackend(AgentBackend, ABC):
     backend_name: str
     backend_label: str
 
-    def __init__(self, command: list[str], timeout_seconds: float) -> None:
-        self._command = command
+    def __init__(self, command: list[str] | None, timeout_seconds: float) -> None:
+        self._command = command or []
         self._timeout_seconds = timeout_seconds
 
     @property
