@@ -19,6 +19,7 @@ from typing import Any, Callable, Protocol
 from .dashboard import Dashboard
 
 logger = logging.getLogger(__name__)
+IGNORED_EVENT_TYPES = frozenset({"ack", "error", "event"})
 
 
 class EventBusLike(Protocol):
@@ -44,6 +45,15 @@ class DashboardIntegration:
     def __init__(self, dashboard: Dashboard, event_bus: EventBusLike) -> None:
         self._dashboard = dashboard
         self._event_bus = event_bus
+        self._handlers: dict[str, Callable[[str, dict[str, Any]], None]] = {
+            "registry.device_online": self._handle_device_online,
+            "registry.device_offline": self._handle_device_offline,
+            "registry.state_updated": self._handle_registry_state_updated,
+            "state": self._handle_state,
+            "transcript": self._handle_transcript,
+            "agent_response": self._handle_agent_response,
+            "audio_delivered": self._handle_audio_delivered,
+        }
 
     def start(self) -> None:
         """Start forwarding events to the dashboard."""
@@ -57,31 +67,38 @@ class DashboardIntegration:
 
     def _on_event(self, event_type: str, device_id: str, payload: dict[str, Any]) -> None:
         """Route events from the gateway to the dashboard."""
-        # Registry events
-        if event_type == "registry.device_online":
-            self._dashboard.on_device_online(device_id, payload)
-        elif event_type == "registry.device_offline":
-            self._dashboard.on_device_offline(device_id)
-        elif event_type == "registry.state_updated":
-            state = payload.get("state", {})
-            self._dashboard.on_state_updated(device_id, state)
+        if event_type in IGNORED_EVENT_TYPES:
+            return
 
-        # DATP events
-        elif event_type == "event":
-            # Generic event (button press, recording finished, etc.)
-            pass  # Could log or display these
-        elif event_type == "state":
-            # Raw state report from device
-            self._dashboard.on_state_updated(device_id, payload)
+        handler = self._handlers.get(event_type)
+        if handler is not None:
+            handler(device_id, payload)
 
-        # Transcript pipeline events
-        elif event_type == "transcript":
-            self._dashboard.on_transcript(device_id, payload)
-        elif event_type == "agent_response":
-            self._dashboard.on_agent_response(device_id, payload)
-        elif event_type == "audio_delivered":
-            self._dashboard.on_audio_delivered(device_id, payload)
+    def _handle_device_online(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward a device online event."""
+        self._dashboard.on_device_online(device_id, payload)
 
-        # Acknowledgements
-        elif event_type in ("ack", "error"):
-            pass  # Could display command status
+    def _handle_device_offline(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward a device offline event while ignoring its payload."""
+        del payload
+        self._dashboard.on_device_offline(device_id)
+
+    def _handle_registry_state_updated(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward registry state payloads using the inner state object."""
+        self._dashboard.on_state_updated(device_id, payload.get("state", {}))
+
+    def _handle_state(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward a raw device state payload."""
+        self._dashboard.on_state_updated(device_id, payload)
+
+    def _handle_transcript(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward a transcript event."""
+        self._dashboard.on_transcript(device_id, payload)
+
+    def _handle_agent_response(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward an agent response event."""
+        self._dashboard.on_agent_response(device_id, payload)
+
+    def _handle_audio_delivered(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward an audio delivery event."""
+        self._dashboard.on_audio_delivered(device_id, payload)
