@@ -5,6 +5,7 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -130,6 +131,13 @@ class TestDevicesEndpoint:
 
 
 class TestCommandEndpoints:
+    async def _add_device(self, gateway_api, device_id):
+        gateway_api._datp.device_registry[device_id] = {
+            "device_id": device_id,
+            "session_id": f"session-{device_id}",
+            "capabilities": {},
+        }
+
     async def test_show_status_device_not_found(self, gateway_api):
         import aiohttp
         url = f"http://{gateway_api._host}:{gateway_api._port}/api/devices/nonexistent/commands/show_status"
@@ -155,6 +163,32 @@ class TestCommandEndpoints:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=body, headers={"Content-Type": "application/json"}) as resp:
                 assert resp.status == 404
+
+    async def test_show_status_mute_and_audio_play_success(self, gateway_api):
+        import aiohttp
+        await self._add_device(gateway_api, "dev-success")
+        gateway_api._dispatcher.show_status = AsyncMock(return_value=True)
+        gateway_api._dispatcher.mute_until = AsyncMock(return_value=True)
+        gateway_api._dispatcher.audio_play = AsyncMock(return_value=True)
+
+        async with aiohttp.ClientSession() as session:
+            base = f"http://{gateway_api._host}:{gateway_api._port}/api/devices/dev-success/commands"
+            async with session.post(f"{base}/show_status", json={"state": "thinking", "label": "Working"}) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["ok"] is True
+                assert data["command"] == "display.show_status"
+
+            async with session.post(f"{base}/mute_until", json={"minutes": 1}) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["minutes"] == 1
+                assert data["command"] == "device.mute_until"
+
+            async with session.post(f"{base}/audio_play", json={}) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["response_id"] == "latest"
 
 
 class TestRouteEndpoint:
@@ -240,27 +274,26 @@ class TestMultiDeviceRouteEndpoint:
                 assert "not found" in data["error"].lower()
 
     async def test_route_multi_with_valid_devices(self, gateway_api):
-        """Test multi-device routing with valid devices.
-        
-        Note: The actual send will fail because mock devices don't have WebSocket
-        connections. This test verifies routing logic selects the correct devices.
-        """
+        """Test multi-device routing with valid devices returns routing metadata."""
         import aiohttp
         await self._add_device(gateway_api, "speaker1", {"is_foreground_device": True})
         await self._add_device(gateway_api, "speaker2", {"is_foreground_device": True})
+        gateway_api._send_audio_to_device = AsyncMock(side_effect=lambda device_id, response_id, pcm_chunks: {
+            "device_id": device_id,
+            "response_id": response_id,
+            "chunks_sent": len(pcm_chunks),
+        })
 
         url = f"http://{gateway_api._host}:{gateway_api._port}/api/route"
         body = json.dumps({"device_ids": ["speaker1", "speaker2"], "text": "Hello world"})
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=body, headers={"Content-Type": "application/json"}) as resp:
-                # 500 because mock devices can't actually receive audio
-                # but routing should have selected both devices
-                assert resp.status == 500
-                # Check the error response
-                text = await resp.text()
-                data = json.loads(text) if text.startswith('{') else {}
-                # Verify routing attempted to use both devices
-                assert "device_errors" in data or "error" in data
+                assert resp.status == 200
+                data = await resp.json()
+        assert data["ok"] is True
+        assert data["device_ids"] == ["speaker1", "speaker2"]
+        assert len(data["devices"]) == 2
+        assert data["routing"]["policy_reason"]
 
     async def test_route_multi_mixed_valid_invalid_devices(self, gateway_api):
         """Test mixed valid/invalid device IDs."""
@@ -287,25 +320,25 @@ class TestMultiDeviceRouteEndpoint:
                 assert "No devices available" in data["error"]
 
     async def test_route_auto_routing_short_text(self, gateway_api):
-        """Test auto-routing selects single foreground for short text.
-        
-        Note: The actual send will fail because mock devices don't have WebSocket
-        connections. This test verifies routing logic selects the correct device.
-        """
+        """Test auto-routing selects a single device for short text."""
         import aiohttp
         await self._add_device(gateway_api, "speaker1", {"is_foreground_device": True})
         await self._add_device(gateway_api, "speaker2", {"is_foreground_device": True})
+        gateway_api._send_audio_to_device = AsyncMock(side_effect=lambda device_id, response_id, pcm_chunks: {
+            "device_id": device_id,
+            "response_id": response_id,
+            "chunks_sent": len(pcm_chunks),
+        })
 
         url = f"http://{gateway_api._host}:{gateway_api._port}/api/route"
-        body = json.dumps({"text": "Hi there"})  # Short text
+        body = json.dumps({"text": "Hi there"})
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=body, headers={"Content-Type": "application/json"}) as resp:
-                # 500 because mock devices can't actually receive audio
-                text = await resp.text()
-                data = json.loads(text) if text.startswith('{') else {}
-                # Should route to one device (short text → single foreground)
-                # The routing info should indicate single device selection
-                assert "error" in data
+                assert resp.status == 200
+                data = await resp.json()
+        assert data["ok"] is True
+        assert len(data["device_ids"]) == 1
+        assert len(data["devices"]) == 1
 
 
 class TestRouteMultiEndpoint:
@@ -340,28 +373,27 @@ class TestRouteMultiEndpoint:
                 assert resp.status == 400
 
     async def test_route_multi_long_text_force_multiple(self, gateway_api):
-        """Test /api/route/multi with force_multiple.
-        
-        Note: The actual send will fail because mock devices don't have WebSocket
-        connections. This test verifies routing logic selects the correct devices.
-        """
+        """Test /api/route/multi returns detailed routing info for long text."""
         import aiohttp
         await self._add_device(gateway_api, "speaker1", {"is_foreground_device": True})
         await self._add_device(gateway_api, "dashboard1", {"is_background_device": True})
+        gateway_api._send_audio_to_device = AsyncMock(side_effect=lambda device_id, response_id, pcm_chunks: {
+            "device_id": device_id,
+            "response_id": response_id,
+            "chunks_sent": len(pcm_chunks),
+        })
 
-        # Create long text
         long_text = " ".join(["word"] * 150)
 
         url = f"http://{gateway_api._host}:{gateway_api._port}/api/route/multi"
         body = json.dumps({"text": long_text, "force_multiple": True})
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=body, headers={"Content-Type": "application/json"}) as resp:
-                # 500 because mock devices can't actually receive audio
-                # but routing should have selected both devices
-                assert resp.status == 500
-                text = await resp.text()
-                data = json.loads(text) if text.startswith('{') else {}
-                assert "error" in data
+                assert resp.status == 200
+                data = await resp.json()
+        assert data["ok"] is True
+        assert len(data["device_ids"]) >= 1
+        assert data["routing"]["estimated_duration_seconds"] > 0
 
 
 class TestStabilityEndpoints:

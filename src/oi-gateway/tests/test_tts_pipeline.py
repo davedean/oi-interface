@@ -274,5 +274,6 @@ def test_piper_backend_raises_import_error_without_piper():
 )
 def test_piper_backend_synthesizes_text():
     """Verify PiperTtsBackend can synthesize text to WAV (if piper installed)."""
-    # This test is skipped unless piper-tts is actually available
-    pytest.skip("Requires piper-tts installation")
+    wav = PiperTtsBackend().synthesize("hello")
+    assert wav[:4] == b"RIFF"
+    assert wav[8:12] == b"WAVE"

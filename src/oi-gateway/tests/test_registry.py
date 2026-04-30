@@ -689,6 +689,10 @@ async def test_integration_get_online_devices(server_with_registry):
             await ws_b.send(json.dumps(make_hello("sim-online-b")))
             await asyncio.wait_for(ws_b.recv(), timeout=5.0)
 
+            for _ in range(20):
+                if len(srv.registry.get_online_devices()) == 2:
+                    break
+                await asyncio.sleep(0.05)
             assert len(srv.registry.get_online_devices()) == 2
 
         # ws_b closed, wait for cleanup

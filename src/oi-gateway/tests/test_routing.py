@@ -214,17 +214,18 @@ class TestRoutingPolicy:
         assert result.device_ids == ["dev1"]
 
     def test_short_response_single_foreground(self, mock_server):
-        """Test short response routes to single foreground device."""
+        """Test short response routes to the first capable foreground device."""
         mock_server.device_registry = {
-            "speaker1": {"capabilities": {"is_foreground_device": True}},
-            "speaker2": {"capabilities": {"is_foreground_device": True}},
+            "speaker1": {"capabilities": {"is_foreground_device": True, "max_spoken_seconds": 60.0}},
+            "speaker2": {"capabilities": {"is_foreground_device": True, "max_spoken_seconds": 60.0}},
         }
         policy = RoutingPolicy(mock_server)
         req = RouteRequest(text="Short message")  # < 100 words
         result = policy.evaluate(req)
         assert result.success is True
-        assert len(result.device_ids) == 1
+        assert result.device_ids == ["speaker1"]
         assert result.is_long_response is False
+        assert result.policy_reason.startswith("Short response")
 
     def test_long_response_multiple_devices(self, mock_server):
         """Test long response routes to multiple devices."""
@@ -244,16 +245,17 @@ class TestRoutingPolicy:
         assert "dashboard1" in result.device_ids
 
     def test_force_multiple_short_text(self, mock_server):
-        """Test force_multiple routes short text to multiple devices."""
+        """Test force_multiple routes short text to exact multi-device selection."""
         mock_server.device_registry = {
-            "speaker1": {"capabilities": {"is_foreground_device": True}},
-            "dashboard1": {"capabilities": {"is_background_device": True}},
+            "speaker1": {"capabilities": {"is_foreground_device": True, "max_spoken_seconds": 120.0}},
+            "dashboard1": {"capabilities": {"is_background_device": True, "max_spoken_seconds": 300.0}},
         }
         policy = RoutingPolicy(mock_server)
         req = RouteRequest(text="Short", force_multiple=True)
         result = policy.evaluate(req)
         assert result.success is True
-        assert len(result.device_ids) > 1
+        assert result.device_ids == ["speaker1", "dashboard1"]
+        assert result.policy_reason.startswith("Long response")
 
     def test_device_duration_capability(self, mock_server):
         """Test devices filtered by max_spoken_seconds."""
@@ -261,12 +263,11 @@ class TestRoutingPolicy:
             "short_only": {"capabilities": {"is_foreground_device": True, "max_spoken_seconds": 30.0}},
         }
         policy = RoutingPolicy(mock_server)
-        # Create text that would take ~60 seconds
         long_text = " ".join(["word"] * 150)  # ~80 seconds
         req = RouteRequest(text=long_text)
         result = policy.evaluate(req)
-        # short_only cannot handle 80 seconds, so no device selected
-        assert len(result.errors) > 0
+        assert result.errors == ["No devices can handle ~60s audio duration"]
+        assert result.policy_reason == "No devices capable of long response"
 
     def test_route_to_devices_convenience(self, mock_server):
         """Test convenience function."""
@@ -276,6 +277,18 @@ class TestRoutingPolicy:
         req = RouteRequest(text="Hello", single_device_id="dev1")
         result = route_to_devices(mock_server, req)
         assert result.success is True
+        assert result.device_ids == ["dev1"]
+        assert result.policy_reason == "Short response (~0s) routed to foreground device 'dev1'"
+
+    def test_short_response_with_no_suitable_device_reports_exact_error(self, mock_server):
+        mock_server.device_registry = {
+            "quiet-dashboard": {"capabilities": {"is_foreground_device": False, "is_background_device": False, "max_spoken_seconds": 120.0}},
+        }
+        policy = RoutingPolicy(mock_server)
+        result = policy.evaluate(RouteRequest(text="short"))
+        assert result.success is False
+        assert result.errors == ["No suitable devices available for short response"]
+        assert result.policy_reason == "No suitable devices found"
 
 
 class TestRoutingPolicyIntegration:

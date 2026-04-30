@@ -4,11 +4,8 @@
 In Progress
 
 ## Tasks
-- Inspected `src/coding/git.py` and `tests/test_coding.py` for coverage gaps.
-- Identified missing unit tests around git command error handling and successful diff/status parsing.
 
 ## Files Changed
-- `progress.md`
 
 ## Notes
-- Existing tests only cover non-git repo handling for `assess_repository()` and `generate_diff()`; most branches in `git.py` are untested.
+- 2026-04-30: Reviewed test evidence in `pyproject.toml`, `tests/test_gateway_api.py`, `tests/test_routing.py`, `tests/test_character_renderer_service.py`, `tests/test_codex_backend.py`, and `tests/test_registry.py`; also ran `pytest -q` for repo-wide verification. Current evidence supports overall HIGH test quality and HIGH overall coverage for `src/oi-gateway`, with caveats on a few lower-covered modules and some integration-test brittleness.

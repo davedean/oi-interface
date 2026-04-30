@@ -131,3 +131,69 @@ async def test_hermes_backend_raises_when_no_assistant_text_found():
 
     with pytest.raises(AgentBackendError, match="assistant text"):
         await backend.send_request(make_request())
+
+
+class FakeStreamResponse(FakeResponse):
+    def __init__(self, lines: list[bytes], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.content = _AsyncBytes(lines)
+
+
+class _AsyncBytes:
+    def __init__(self, lines: list[bytes]) -> None:
+        self._iter = iter(lines)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration:
+            raise StopAsyncIteration
+
+
+@pytest.mark.asyncio
+async def test_hermes_backend_streaming_sse_yields_deltas_and_final():
+    response = FakeStreamResponse(
+        [
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"},\"finish_reason\":null}]}\n",
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":null}]}\n",
+            b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n",
+            b"data: [DONE]\n",
+        ]
+    )
+    session = FakeSession(response)
+    backend = HermesBackend(base_url="http://127.0.0.1:8000", api_key="secret-key", session_factory=lambda: session)
+
+    chunks = [chunk async for chunk in backend.send_request_streaming(make_request())]
+
+    assert [chunk.text_delta for chunk in chunks] == ["Hello ", "world", "", ""]
+    assert [chunk.is_final for chunk in chunks] == [False, False, True, True]
+    assert chunks[2].metadata == {"finish_reason": "stop"}
+
+
+def test_hermes_backend_text_helpers_cover_list_and_invalid_content():
+    backend = HermesBackend(base_url="http://127.0.0.1:8000", api_key="secret-key")
+
+    assert backend._map_session_key(make_request()) == "oi-device-test-device"
+    req = AgentRequest(
+        user_text="hello",
+        source_device_id="test-device",
+        input_kind="transcript",
+        stream_id="rec_001",
+        transcript="hello",
+        session_key=None,
+    )
+    assert backend._map_session_key(req) is None
+
+    assert backend._extract_text_content("hello") == "hello"
+    assert backend._extract_text_content([
+        "a",
+        {"type": "text", "text": "b"},
+        {"type": "output_text", "content": "c"},
+        {"type": "image", "text": "ignore"},
+    ]) == "abc"
+    assert backend._extract_text_content([{"type": "image"}]) is None
+    assert backend._extract_response_text({"choices": [{"message": {"content": [{"type": "text", "text": "ok"}]}}]}) == "ok"
+    assert backend._extract_response_text({"choices": ["bad"]}) is None

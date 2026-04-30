@@ -235,3 +235,110 @@ def test_openclaw_backend_device_identity_path_uses_oi_home(tmp_path, monkeypatc
     assert backend._device_identity_path() == (
         tmp_path / "oi-home" / "state" / "oi-gateway" / "openclaw-device-identity.json"
     )
+
+
+def test_openclaw_backend_helper_methods_cover_text_and_metadata_paths():
+    backend, _ = make_backend(FakeWebSocket([]))
+
+    assert backend._map_session_key("agent:abc", "dev") == "agent:abc"
+    assert backend._map_session_key("oi:device:frontdoor", "dev") == "agent:main:oi:device:frontdoor"
+    assert backend._map_session_key(None, "dev") == "agent:main:oi:device:dev"
+
+    assert backend._extract_text_from_openclaw_payload({"text": "a"}) == "a"
+    assert backend._extract_text_from_openclaw_payload({"content": "b"}) == "b"
+    assert backend._extract_text_from_openclaw_payload({"message": "c"}) == "c"
+    assert backend._extract_text_from_openclaw_payload({"delta": "d"}) == "d"
+    assert backend._extract_text_from_openclaw_payload({"data": "e"}) == "e"
+    assert backend._extract_text_from_openclaw_payload([]) == ""
+
+    payload = {
+        "result": {
+            "payloads": [{"text": "one"}, {"ignore": True}, "bad", {"text": "two"}],
+            "meta": {"model": "x"},
+        }
+    }
+    assert backend._extract_response_text(payload) == "one\ntwo"
+    assert backend._extract_response_text({"result": {"payloads": []}}) is None
+    assert backend._extract_metadata(payload) == {"model": "x"}
+    assert backend._extract_metadata({"result": {"meta": []}}) == {}
+
+    assert backend._build_device_auth_payload_v3(
+        device_id="dev1",
+        client_id="gateway-client",
+        client_mode="backend",
+        role="operator",
+        scopes=["read", "write"],
+        signed_at_ms=1,
+        token="tok",
+        nonce="nonce",
+        platform=" Linux ",
+        device_family=" Desktop ",
+    ) == "v3|dev1|gateway-client|backend|operator|read,write|1|tok|nonce|linux|desktop"
+
+
+@pytest.mark.asyncio
+async def test_openclaw_backend_streams_event_deltas_then_final_chunk():
+    ws = FakeWebSocket(
+        [
+            {"type": "event", "event": "connect.challenge", "payload": {"nonce": "nonce-1"}},
+            {"type": "res", "id": "connect-1", "ok": True, "payload": {"auth": {}}},
+            {"type": "event", "event": "agent.delta", "payload": {"text": "Hello "}},
+            {"type": "event", "event": "agent.delta", "payload": {"delta": "world"}},
+            {"type": "res", "id": "agent-2", "ok": True, "payload": {"status": "accepted"}},
+            {
+                "type": "res",
+                "id": "agent-2",
+                "ok": True,
+                "payload": {
+                    "status": "ok",
+                    "result": {
+                        "payloads": [{"text": "Hello world!"}],
+                        "meta": {"final": True},
+                    },
+                },
+            },
+        ]
+    )
+    backend, _ = make_backend(ws)
+
+    chunks = [chunk async for chunk in backend.send_request_streaming(make_request())]
+
+    assert [chunk.text_delta for chunk in chunks] == ["Hello ", "world", "!"]
+    assert [chunk.is_final for chunk in chunks] == [False, False, True]
+    assert chunks[-1].metadata == {"final": True}
+
+
+@pytest.mark.asyncio
+async def test_openclaw_backend_raises_on_malformed_and_mismatched_frames():
+    ws = FakeWebSocket(
+        [
+            {"type": "event", "event": "connect.challenge", "payload": {"nonce": "nonce-1"}},
+            {"type": "res", "id": "connect-1", "ok": True, "payload": {"auth": {}}},
+            {"type": "note", "id": "agent-2", "ok": True, "payload": {}},
+        ]
+    )
+    backend, _ = make_backend(ws)
+    with pytest.raises(AgentBackendError, match="non-response frame"):
+        await backend.send_request(make_request())
+
+    ws = FakeWebSocket(
+        [
+            {"type": "event", "event": "connect.challenge", "payload": {"nonce": "nonce-1"}},
+            {"type": "res", "id": "connect-1", "ok": True, "payload": {"auth": {}}},
+            {"type": "res", "id": "wrong", "ok": True, "payload": {}},
+        ]
+    )
+    backend, _ = make_backend(ws)
+    with pytest.raises(AgentBackendError, match="mismatched response id"):
+        await backend.send_request(make_request())
+
+    ws = FakeWebSocket(
+        [
+            {"type": "event", "event": "connect.challenge", "payload": {"nonce": "nonce-1"}},
+            {"type": "res", "id": "connect-1", "ok": True, "payload": {"auth": {}}},
+            {"type": "res", "id": "agent-2", "ok": True, "payload": []},
+        ]
+    )
+    backend, _ = make_backend(ws)
+    with pytest.raises(AgentBackendError, match="malformed payload"):
+        await backend.send_request(make_request())
