@@ -45,6 +45,7 @@ class OiSimREPL:
 
     event_history_limit = 10
     help_text = HELP_TEXT
+    text_prompt_usage = TEXT_PROMPT_USAGE
 
     def __init__(
         self,
@@ -113,7 +114,19 @@ class OiSimREPL:
         cmd = parts[0].lower() if parts else ""
         args = parts[1:]
 
-        commands = {
+        handler = self._command_handlers().get(cmd)
+        if handler is None:
+            print(f"Unknown command: {cmd}. Type 'help' for available commands.")
+            return
+
+        try:
+            await handler(args)
+        except Exception as e:
+            print(f"✗ Error: {e}")
+
+    def _command_handlers(self) -> dict[str, Any]:
+        """Map command names to handler methods."""
+        return {
             "hold": self._cmd_hold,
             "release": self._cmd_release,
             "tap": self._cmd_tap,
@@ -135,23 +148,11 @@ class OiSimREPL:
             "exit": self._cmd_quit,
         }
 
-        if cmd in commands:
-            try:
-                await commands[cmd](args)
-            except Exception as e:
-                print(f"✗ Error: {e}")
-        else:
-            print(f"Unknown command: {cmd}. Type 'help' for available commands.")
-
     async def _receive_loop(self):
         """Background task to receive and display messages from gateway."""
         while self.running and self.sim:
             await asyncio.sleep(0.1)
-            commands = self.sim.received_commands
-            if len(commands) > self._printed_command_count:
-                for command in commands[self._printed_command_count:]:
-                    self._print_command(command)
-                self._printed_command_count = len(commands)
+            self._print_pending_commands(self._print_command)
 
     async def _stop_receive_task(self) -> None:
         """Cancel and await the background receive task if it is running."""
@@ -164,6 +165,17 @@ class OiSimREPL:
             pass
         finally:
             self._receive_task = None
+
+    def _print_pending_commands(self, printer: Any) -> None:
+        """Print commands received since the last REPL refresh."""
+        assert self.sim is not None
+        commands = self.sim.received_commands
+        if len(commands) <= self._printed_command_count:
+            return
+
+        for command in commands[self._printed_command_count:]:
+            printer(command)
+        self._printed_command_count = len(commands)
 
     def _print_command(self, command: dict[str, Any], *, leading_newline: bool = False) -> None:
         """Print a received command in a compact human-friendly format."""
@@ -181,7 +193,7 @@ class OiSimREPL:
 
     def _print_text_prompt_usage(self) -> None:
         """Show usage for text-prompt commands."""
-        print(TEXT_PROMPT_USAGE)
+        print(self.text_prompt_usage)
 
     def _print_event_history(self, messages: list[dict[str, Any]]) -> None:
         """Print recent message history."""
@@ -254,14 +266,26 @@ class OiSimREPL:
 
     async def _cmd_text(self, args):
         """Send a text prompt to the agent."""
+        text = await self._send_text_prompt(args)
+        if text is not None:
+            self._after_text_prompt_sent(text)
+
+    async def _send_text_prompt(self, args: list[str]) -> str | None:
+        """Send a text prompt and print the common REPL status output."""
         assert self.sim is not None
         if not args:
             self._print_text_prompt_usage()
-            return
+            return None
+
         text = " ".join(args)
         await self.sim.send_text_prompt(text)
         print(f'📤 text.prompt (text="{text}")')
         print(f"📥 State: {self.sim.state.value}")
+        return text
+
+    def _after_text_prompt_sent(self, text: str) -> None:
+        """Hook for subclasses that want extra output after sending text."""
+        del text
 
     async def _cmd_battery(self, args):
         """Send battery update."""

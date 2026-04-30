@@ -12,29 +12,13 @@ from typing import Any
 
 from sim.repl import OiSimREPL
 
-HELP_TEXT = """
-Commands:
-  hold        - Long press (start recording)
-  release     - Release button (stop recording)
-  tap         - Short button press
-  double      - Double tap
-  mute        - Very long hold (mute)
-  text <msg>  - Send text prompt to agent (shows streaming response!)
-  ask <msg>   - Same as text (alias)
-  play [id]   - Start audio playback (default: latest)
-  stop        - Stop audio playback
-  battery N   - Send battery N%
-  charging    - charging start|stop
-  wifi N      - Send wifi RSSI N
-  connect     - Connect to gateway
-  disconnect  - Disconnect
-  state       - Show device state
-  events      - Show event history (includes agent text deltas)
-  help        - Show this help
-  quit        - Exit
-
-Streaming: Agent responses appear in real-time as the text streams in!
-""".strip()
+HELP_TEXT = OiSimREPL.help_text.replace(
+    "text <msg>  - Send text prompt to agent",
+    "text <msg>  - Send text prompt to agent (shows streaming response!)",
+).replace(
+    "events      - Show event history",
+    "events      - Show event history (includes agent text deltas)",
+) + "\n\nStreaming: Agent responses appear in real-time as the text streams in!"
 
 
 class StreamingOiSimREPL(OiSimREPL):
@@ -55,11 +39,7 @@ class StreamingOiSimREPL(OiSimREPL):
         """Background task to receive and display messages from gateway."""
         while self.running and self.sim:
             await asyncio.sleep(0.1)
-            commands = self.sim.received_commands
-            if len(commands) > self._printed_command_count:
-                for command in commands[self._printed_command_count:]:
-                    self._print_streaming_command(command)
-                self._printed_command_count = len(commands)
+            self._print_pending_commands(self._print_streaming_command)
 
     def _print_streaming_command(self, command: dict[str, Any]) -> None:
         """Print a received command, handling streamed text specially."""
@@ -105,18 +85,10 @@ class StreamingOiSimREPL(OiSimREPL):
             return f"  {index}. 📤 agent_response_delta: '{text}'..."
         return super()._format_message_history_entry(index, msg)
 
-    async def _cmd_text(self, args):
-        """Send a text prompt to the agent and display streaming response."""
-        assert self.sim is not None
-        if not args:
-            self._print_text_prompt_usage()
-            return
-        text = " ".join(args)
+    def _after_text_prompt_sent(self, text: str) -> None:
+        """Reset the streaming buffer and show the streaming response prompt."""
+        del text
         self.current_response_text = ""
-
-        await self.sim.send_text_prompt(text)
-        print(f'📤 text.prompt (text="{text}")')
-        print(f"📥 State: {self.sim.state.value}")
         print("\n💬 Agent: ", end="", flush=True)
 
 
