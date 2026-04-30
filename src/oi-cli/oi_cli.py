@@ -26,6 +26,16 @@ DEFAULT_API_BASE = "http://localhost:8788"
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("oi")
 
+COMMAND_RESULT_FIELDS = (
+    ("state", "State"),
+    ("label", "Label"),
+    ("minutes", "Minutes"),
+    ("until", "Until"),
+    ("response_id", "Response ID"),
+    ("chunks_sent", "Chunks sent"),
+    ("text", "Text"),
+)
+
 
 # ------------------------------------------------------------------
 # HTTP client helpers
@@ -136,23 +146,18 @@ def format_human_command(result: dict[str, Any]) -> str:
     device = result.get("device_id", "?")
     status = "✓" if ok else "✗"
     lines = [f"{status} {cmd} → {device}"]
-    if "state" in result:
-        lines.append(f"  State: {result['state']}")
-    if "label" in result:
-        lines.append(f"  Label: {result['label']}")
-    if "minutes" in result:
-        lines.append(f"  Minutes: {result['minutes']}")
-    if "until" in result:
-        lines.append(f"  Until: {result['until']}")
-    if "response_id" in result:
-        lines.append(f"  Response ID: {result['response_id']}")
-    if "chunks_sent" in result:
-        lines.append(f"  Chunks sent: {result['chunks_sent']}")
-    if "text" in result:
-        lines.append(f"  Text: {result['text']}")
+    for field_name, label in COMMAND_RESULT_FIELDS:
+        if field_name in result:
+            lines.append(f"  {label}: {result[field_name]}")
     if not ok:
         lines.append("  ⚠ Command not acknowledged by device")
     return "\n".join(lines)
+
+
+def print_result(result: dict[str, Any], human: bool, human_formatter: callable) -> None:
+    """Print JSON or human-formatted command output."""
+    output = human_formatter(result) if human else format_json(result)
+    print(output)
 
 
 # ------------------------------------------------------------------
@@ -162,22 +167,12 @@ def format_human_command(result: dict[str, Any]) -> str:
 
 def cmd_devices(client: APIClient, human: bool) -> None:
     """List online devices with their capabilities."""
-    result = client.get("/api/devices")
-    if human:
-        output = format_human_devices(result)
-    else:
-        output = format_json(result)
-    print(output)
+    print_result(client.get("/api/devices"), human, format_human_devices)
 
 
 def cmd_status(client: APIClient, human: bool) -> None:
     """Show gateway health and connected device count."""
-    result = client.get("/api/health")
-    if human:
-        output = format_human_status(result)
-    else:
-        output = format_json(result)
-    print(output)
+    print_result(client.get("/api/health"), human, format_human_status)
 
 
 def cmd_show_status(client: APIClient, device_id: str, state: str, label: str | None, human: bool) -> None:
@@ -185,34 +180,29 @@ def cmd_show_status(client: APIClient, device_id: str, state: str, label: str | 
     body: dict[str, Any] = {"state": state}
     if label is not None:
         body["label"] = label
-    result = client.post(f"/api/devices/{device_id}/commands/show_status", body)
-    if human:
-        output = format_human_command(result)
-    else:
-        output = format_json(result)
-    print(output)
+    print_result(
+        client.post(f"/api/devices/{device_id}/commands/show_status", body),
+        human,
+        format_human_command,
+    )
 
 
 def cmd_mute(client: APIClient, device_id: str, minutes: int, human: bool) -> None:
     """Mute a device for a given number of minutes."""
-    body = {"minutes": minutes}
-    result = client.post(f"/api/devices/{device_id}/commands/mute_until", body)
-    if human:
-        output = format_human_command(result)
-    else:
-        output = format_json(result)
-    print(output)
+    print_result(
+        client.post(f"/api/devices/{device_id}/commands/mute_until", {"minutes": minutes}),
+        human,
+        format_human_command,
+    )
 
 
 def cmd_route(client: APIClient, device_id: str, text: str, human: bool) -> None:
     """Route TTS audio to a device (TTS + cache)."""
-    body = {"device_id": device_id, "text": text}
-    result = client.post("/api/route", body)
-    if human:
-        output = format_human_command(result)
-    else:
-        output = format_json(result)
-    print(output)
+    print_result(
+        client.post("/api/route", {"device_id": device_id, "text": text}),
+        human,
+        format_human_command,
+    )
 
 
 def cmd_audio_play(client: APIClient, device_id: str, response_id: str | None, human: bool) -> None:
@@ -220,12 +210,11 @@ def cmd_audio_play(client: APIClient, device_id: str, response_id: str | None, h
     body: dict[str, Any] = {}
     if response_id is not None:
         body["response_id"] = response_id
-    result = client.post(f"/api/devices/{device_id}/commands/audio_play", body)
-    if human:
-        output = format_human_command(result)
-    else:
-        output = format_json(result)
-    print(output)
+    print_result(
+        client.post(f"/api/devices/{device_id}/commands/audio_play", body),
+        human,
+        format_human_command,
+    )
 
 
 # ------------------------------------------------------------------
@@ -233,15 +222,23 @@ def cmd_audio_play(client: APIClient, device_id: str, response_id: str | None, h
 # ------------------------------------------------------------------
 
 
+def add_api_url_argument(parser: argparse.ArgumentParser, help_text: str) -> None:
+    """Add the shared API URL override argument to a parser."""
+    parser.add_argument(
+        "--api-url",
+        default=DEFAULT_API_BASE,
+        help=help_text,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="oi",
         description="oi-cli — CLI wrapper for oi-gateway resource tree API",
     )
-    parser.add_argument(
-        "--api-url",
-        default=DEFAULT_API_BASE,
-        help=f"Base URL of oi-gateway API (default: {DEFAULT_API_BASE})",
+    add_api_url_argument(
+        parser,
+        f"Base URL of oi-gateway API (default: {DEFAULT_API_BASE})",
     )
     parser.add_argument(
         "--human",
@@ -258,60 +255,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     # oi devices
     p_devices = subparsers.add_parser("devices", help="List online devices + capabilities")
-    p_devices.add_argument(
-        "--api-url",
-        default=DEFAULT_API_BASE,
-        help=f"Override API base URL",
-    )
+    add_api_url_argument(p_devices, "Override API base URL")
 
     # oi status
     p_status = subparsers.add_parser("status", help="Gateway health + connected device count")
-    p_status.add_argument(
-        "--api-url",
-        default=DEFAULT_API_BASE,
-        help=f"Override API base URL",
-    )
+    add_api_url_argument(p_status, "Override API base URL")
 
     # oi show-status
     p_show = subparsers.add_parser("show-status", help="Invoke display.show_status")
     p_show.add_argument("--device", required=True, help="Target device ID")
     p_show.add_argument("--state", required=True, help="Status state (e.g., thinking, idle)")
     p_show.add_argument("--label", help="Optional label text")
-    p_show.add_argument(
-        "--api-url",
-        default=DEFAULT_API_BASE,
-        help=f"Override API base URL",
-    )
+    add_api_url_argument(p_show, "Override API base URL")
 
     # oi mute
     p_mute = subparsers.add_parser("mute", help="Mute a device for N minutes")
     p_mute.add_argument("--device", required=True, help="Target device ID")
     p_mute.add_argument("--minutes", required=True, type=int, help="Number of minutes to mute")
-    p_mute.add_argument(
-        "--api-url",
-        default=DEFAULT_API_BASE,
-        help=f"Override API base URL",
-    )
+    add_api_url_argument(p_mute, "Override API base URL")
 
     # oi route
     p_route = subparsers.add_parser("route", help="TTS + cache audio to device")
     p_route.add_argument("--device", required=True, help="Target device ID")
     p_route.add_argument("--text", required=True, help="Text to synthesize and route")
-    p_route.add_argument(
-        "--api-url",
-        default=DEFAULT_API_BASE,
-        help=f"Override API base URL",
-    )
+    add_api_url_argument(p_route, "Override API base URL")
 
     # oi audio-play
     p_play = subparsers.add_parser("audio-play", help="Play cached audio on device")
     p_play.add_argument("--device", required=True, help="Target device ID")
     p_play.add_argument("--response-id", help="Response ID to play (default: latest)")
-    p_play.add_argument(
-        "--api-url",
-        default=DEFAULT_API_BASE,
-        help=f"Override API base URL",
-    )
+    add_api_url_argument(p_play, "Override API base URL")
 
     return parser
 
