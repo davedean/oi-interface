@@ -21,15 +21,27 @@ from sim.fixtures import load_fixture
 # Fixtures
 # ------------------------------------------------------------------
 
+async def _wait_for_server_port(srv: DATPServer, timeout_seconds: float = 1.0) -> None:
+    """Wait until the DATP test server has bound an ephemeral port."""
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    while srv.port == 0:
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError("DATP test server did not bind a port in time")
+        await asyncio.sleep(0.01)
+
+
 @pytest.fixture
 async def datp_server():
     """Start the DATP server, yield it, then stop it."""
     srv = DATPServer(host="localhost", port=0)
     task = asyncio.create_task(srv.start())
-    await asyncio.sleep(0.15)  # allow bind to complete
-    yield srv
-    await srv.stop()
-    await asyncio.sleep(0.15)
+    await _wait_for_server_port(srv)
+    try:
+        yield srv
+    finally:
+        await srv.stop()
+        await task
+        await asyncio.sleep(0.15)
 
 
 @pytest.fixture
