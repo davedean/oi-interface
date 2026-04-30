@@ -1,32 +1,41 @@
-# Oi Dashboard
+# oi-dashboard
 
-Real-time web dashboard for oi-gateway monitoring.
+Real-time monitoring dashboard for `oi-gateway`.
 
-## Features
+## What it shows
 
-- Connected devices with status indicators
-- Device state display (mode, battery, RSSI)
-- Recent transcripts and responses
-- Audio cache state per device
-- Real-time updates via Server-Sent Events (SSE)
+- Connected devices and online/offline status
+- Device state (for example mode, battery, RSSI when available)
+- Recent transcripts and agent responses
+- Audio cache size by device
+- Live updates via Server-Sent Events (SSE)
 
-## Installation
+## Requirements
+
+- Python 3.11+
+- A running `oi-gateway` API (default expected at `http://localhost:8788`)
+
+## Quick start
 
 ```bash
+cd src/oi-dashboard
 pip install -e .
-```
-
-## Usage
-
-```bash
 oi-dashboard --api-url http://localhost:8788 --host localhost --port 8789
 ```
 
-Then open `http://localhost:8789` in your browser.
+Open `http://localhost:8789`.
+
+If your gateway runs elsewhere, change `--api-url`.
 
 ## Development
 
 ```bash
+cd src/oi-dashboard
 pip install -e ".[dev]"
 pytest tests/
 ```
+
+## Notes
+
+- The dashboard is read-only and proxies selected gateway API endpoints.
+- TODO: add a short local dev stack example that starts `oi-gateway` + `oi-dashboard` together.
