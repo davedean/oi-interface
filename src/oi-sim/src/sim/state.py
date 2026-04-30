@@ -79,6 +79,9 @@ class StateMachine:
         The starting state (default READY).
     """
 
+    _DISPLAY_DELTA_OPS = frozenset({"display.show_response_delta", "display.show_text_delta"})
+    _STATELESS_COMMANDS = frozenset({"storage.format", "wifi.configure"})
+
     __slots__ = (
         "_state",
         "_display_state",
@@ -139,8 +142,7 @@ class StateMachine:
         args : dict, optional
             Command arguments (varies by op type).
         """
-        if args is None:
-            args = {}
+        args = args or {}
 
         if op == "display.show_status":
             self._display_state = args.get("state")
@@ -148,94 +150,66 @@ class StateMachine:
             return self._state
 
         if op == "display.show_card":
-            # A text/card response indicates the agent has completed thinking.
-            # Move THINKING -> RESPONSE_CACHED when valid; otherwise keep current state.
-            if State.RESPONSE_CACHED in _valid_destinations(self._state):
-                return self.transition(State.RESPONSE_CACHED)
-            return self._state
+            return self._transition_if_allowed(State.RESPONSE_CACHED)
 
-        if op in {"display.show_response_delta", "display.show_text_delta"}:
-            # Text streaming delta - stays in current state while streaming.
-            # On final delta, transition to RESPONSE_CACHED.
-            is_final = args.get("is_final", False)
-            if is_final and State.RESPONSE_CACHED in _valid_destinations(self._state):
-                return self.transition(State.RESPONSE_CACHED)
-            # Otherwise stay in current state (typically THINKING)
+        if op in self._DISPLAY_DELTA_OPS:
+            if args.get("is_final", False):
+                return self._transition_if_allowed(State.RESPONSE_CACHED)
             return self._state
 
         if op == "audio.cache.put_begin":
-            # Start caching sequence — stays in current state until put_end.
-            # Accepted from UPLOADING (device is uploading, agent responded before thinking event)
-            # or from THINKING (standard flow after agent response).
             self._caching = True
             self._cache_chunk_count = 0
             return self._state
 
         if op == "audio.cache.put_chunk":
-            # Intermediate chunk in cache sequence.
             if self._caching:
                 self._cache_chunk_count += 1
             return self._state
 
         if op == "audio.cache.put_end":
-            # Complete cache sequence — transition to RESPONSE_CACHED.
-            # Accepted from any state that allows this transition (UPLOADING, THINKING, etc.).
-            # States that cannot transition to RESPONSE_CACHED are accepted silently
-            # (the caching flag is still cleared to keep internal state clean).
             self._caching = False
-            if State.RESPONSE_CACHED in _valid_destinations(self._state):
-                return self.transition(State.RESPONSE_CACHED)
-            return self._state
+            return self._transition_if_allowed(State.RESPONSE_CACHED)
 
         if op == "audio.play":
-            # Idempotent: if already PLAYING, treat as a no-op rather than raising.
-            if self._state == State.PLAYING:
-                return self._state
-            return self.transition(State.PLAYING)
+            return self._state if self._state == State.PLAYING else self.transition(State.PLAYING)
 
         if op == "audio.stop":
-            # Idempotent: if already READY, no-op.
-            if self._state == State.READY:
-                return self._state
-            return self.transition(State.READY)
+            return self._state if self._state == State.READY else self.transition(State.READY)
 
         if op == "device.mute_until":
             self._muted_until = args.get("until")
             return self.transition(State.MUTED)
 
         if op == "device.set_brightness":
-            # No state change; brightness is a property.
-            self._brightness = args.get("value", self._brightness)
-            return self._state
+            return self._set_and_keep_state("_brightness", args.get("value", self._brightness))
 
         if op == "device.set_volume":
-            # No state change; volume is a property.
-            self._volume = args.get("level", self._volume)
-            return self._state
+            return self._set_and_keep_state("_volume", args.get("level", self._volume))
 
         if op == "device.set_led":
-            # No state change; LED is a property.
-            self._led_enabled = args.get("enabled", self._led_enabled)
-            return self._state
+            return self._set_and_keep_state("_led_enabled", args.get("enabled", self._led_enabled))
 
         if op == "device.reboot":
-            # Reboot transitions to BOOTING (system reset)
             return self.transition(State.BOOTING)
 
         if op == "device.shutdown":
-            # Shutdown transitions to OFFLINE (device powered off)
             return self.transition(State.OFFLINE)
 
-        if op == "storage.format":
-            # Format clears audio cache - no state change but could affect cached audio
-            # This is a no-op for state machine but the device would respond
+        if op in self._STATELESS_COMMANDS:
             return self._state
 
-        if op == "wifi.configure":
-            # WiFi configuration doesn't change device state
-            return self._state
+        return self._state
 
-        # Unknown op — silent no-op (future extensibility).
+    def _transition_if_allowed(self, new_state: State) -> State:
+        """Transition to ``new_state`` when valid; otherwise keep the current state."""
+        if new_state in _valid_destinations(self._state):
+            return self.transition(new_state)
+        return self._state
+
+    def _set_and_keep_state(self, attr_name: str, value: object) -> State:
+        """Update a non-state property without changing the current state."""
+        setattr(self, attr_name, value)
         return self._state
 
     # ------------------------------------------------------------------
