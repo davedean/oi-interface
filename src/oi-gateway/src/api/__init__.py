@@ -143,10 +143,14 @@ class GatewayAPI:
         except json.JSONDecodeError:
             raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid JSON body"}))
 
-    def _build_device_info(self, device_entry: dict) -> dict[str, Any]:
+    def _require_registered_device(self, device_id: str) -> dict[str, Any] | None:
+        return self._datp.device_registry.get(device_id)
+
+    def _build_device_info(self, device_entry: dict, *, device_id: str | None = None) -> dict[str, Any]:
         """Build a clean device info dict from a device registry entry."""
+        resolved_device_id = device_id or device_entry.get("device_id", "unknown")
         info = {
-            "device_id": device_entry.get("device_id", "unknown"),
+            "device_id": resolved_device_id,
             "session_id": device_entry.get("session_id"),
             "online": True,
             "capabilities": device_entry.get("capabilities", {}),
@@ -196,11 +200,8 @@ class GatewayAPI:
     async def _devices_list(self, request: web.Request) -> web.Response:
         """GET /api/devices — list all connected devices."""
         devices = []
-        for device_id in self._datp.device_registry:
-            entry = self._datp.device_registry[device_id]
-            info = self._build_device_info(entry)
-            info["device_id"] = device_id
-            devices.append(info)
+        for device_id, entry in self._datp.device_registry.items():
+            devices.append(self._build_device_info(entry, device_id=device_id))
 
         return self._json_response({
             "devices": devices,
@@ -211,13 +212,11 @@ class GatewayAPI:
         """GET /api/devices/{device_id} — full state of one device."""
         device_id = request.match_info["device_id"]
 
-        if device_id not in self._datp.device_registry:
+        entry = self._require_registered_device(device_id)
+        if entry is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
-        entry = self._datp.device_registry[device_id]
-        info = self._build_device_info(entry)
-        info["device_id"] = device_id
-        return self._json_response(info)
+        return self._json_response(self._build_device_info(entry, device_id=device_id))
 
     async def _cmd_show_status(self, request: web.Request) -> web.Response:
         """POST /api/devices/{device_id}/commands/show_status — display.show_status."""
@@ -230,8 +229,7 @@ class GatewayAPI:
 
         label = body.get("label")
 
-        # Check device is online
-        if device_id not in self._datp.device_registry:
+        if self._require_registered_device(device_id) is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
         # Convert label to empty string if None (command expects optional)
@@ -263,7 +261,7 @@ class GatewayAPI:
         if minutes < 0:
             return self._error_response("minutes must be non-negative")
 
-        if device_id not in self._datp.device_registry:
+        if self._require_registered_device(device_id) is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
         until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
@@ -287,7 +285,7 @@ class GatewayAPI:
 
         response_id = body.get("response_id", "latest")
 
-        if device_id not in self._datp.device_registry:
+        if self._require_registered_device(device_id) is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
         ok = await self._dispatcher.audio_play(device_id, response_id)
@@ -407,7 +405,8 @@ class GatewayAPI:
 
             # Validate all device IDs exist
             missing_devices = [
-                d for d in device_ids_raw if d not in self._datp.device_registry
+                device_id for device_id in device_ids_raw
+                if self._require_registered_device(device_id) is None
             ]
             if missing_devices:
                 return self._error_response(
@@ -420,7 +419,7 @@ class GatewayAPI:
             )
         elif single_device_id:
             # Single device mode (backward compatible)
-            if single_device_id not in self._datp.device_registry:
+            if self._require_registered_device(single_device_id) is None:
                 return self._error_response(f"Device '{single_device_id}' not found", 404)
 
             route_request = RouteRequest(
@@ -645,7 +644,7 @@ class GatewayAPI:
         """
         device_id = request.match_info["device_id"]
 
-        if device_id not in self._datp.device_registry:
+        if self._require_registered_device(device_id) is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
         if self._datp.registry is None:
