@@ -265,8 +265,13 @@ async def test_menu_character_size_toggle(app: HandheldApp) -> None:
 async def test_menu_mute_toggle(app: HandheldApp) -> None:
     app._ui_mode = UIMode.HOME
     await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
-    app._menu_idx = app._menu_items().index("Mute")
+    app._menu_idx = app._menu_items().index("Mute Duration")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._mute_duration_hours == 1
 
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "settings"
+    app._menu_idx = app._menu_items().index("Mute")
     await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
     assert app._device_control.is_muted() is True
     assert app._card.title == "Mute"
@@ -279,9 +284,28 @@ async def test_menu_mute_toggle(app: HandheldApp) -> None:
 
 
 @pytest.mark.asyncio
-async def test_menu_show_progress_toggle(app: HandheldApp) -> None:
+async def test_menu_device_settings_and_show_progress_toggle(app: HandheldApp) -> None:
     app._ui_mode = UIMode.HOME
     await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
+
+    app._menu_idx = app._menu_items().index("Brightness")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._device_control.brightness == 64
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "settings"
+    app._menu_idx = app._menu_items().index("Volume")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._device_control.volume == 100
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "settings"
+    app._menu_idx = app._menu_items().index("LED")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._device_control.led_enabled is False
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "settings"
     app._menu_idx = app._menu_items().index("Show Progress")
     await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
 
@@ -289,6 +313,29 @@ async def test_menu_show_progress_toggle(app: HandheldApp) -> None:
     app._card.body = "Working"
     app._handle_command({"op": "display.show_progress", "args": {"text": "step 1"}})
     assert "step 1" not in app._card.body
+
+
+@pytest.mark.asyncio
+async def test_settings_diagnostics_and_system_menu(app: HandheldApp) -> None:
+    app._online = True
+    app._ui_mode = UIMode.HOME
+    await app._handle_input(SimpleNamespace(type="button", name="select", action="pressed", raw=0))
+
+    app._menu_idx = app._menu_items().index("Diagnostics")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._card.title == "Diagnostics"
+    assert "brightness:" in app._card.body
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "settings"
+    app._menu_idx = app._menu_items().index("System")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._menu_mode == "system"
+
+    app._menu_idx = app._menu_items().index("Reboot")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app._card.title == "Reboot"
+    assert "blocked" in app._card.body
 
 
 @pytest.mark.asyncio
@@ -379,3 +426,7 @@ async def test_settings_persist_callback_invoked(monkeypatch) -> None:
     assert "character_size" in latest
     assert "show_progress_messages" in latest
     assert "show_celebrations" in latest
+    assert "brightness" in latest
+    assert "volume" in latest
+    assert "led_enabled" in latest
+    assert "mute_duration_hours" in latest

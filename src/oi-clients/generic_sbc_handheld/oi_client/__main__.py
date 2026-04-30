@@ -43,6 +43,10 @@ DEFAULT_CONFIG = {
     "character_size": "big",
     "show_progress_messages": True,
     "show_celebrations": True,
+    "brightness": 255,
+    "volume": 80,
+    "led_enabled": True,
+    "mute_duration_hours": 24,
 }
 
 
@@ -94,6 +98,14 @@ def save_config(path: str, updates: dict[str, object]) -> None:
     p.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
 
 
+def config_int(config: dict[str, object], key: str) -> int:
+    default = int(DEFAULT_CONFIG[key])
+    try:
+        return int(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
 # ------------------------------------------------------------------
 # Button map — verified on RG351P (AmberELEC)
 # ------------------------------------------------------------------
@@ -137,6 +149,10 @@ async def main():
         character_size=config.get("character_size", "big"),
         show_progress_messages=bool(config.get("show_progress_messages", True)),
         show_celebrations=bool(config.get("show_celebrations", True)),
+        brightness=config_int(config, "brightness"),
+        volume=config_int(config, "volume"),
+        led_enabled=bool(config.get("led_enabled", True)),
+        mute_duration_hours=config_int(config, "mute_duration_hours"),
         settings_persist=lambda updates: save_config(config_path, updates),
     )
 

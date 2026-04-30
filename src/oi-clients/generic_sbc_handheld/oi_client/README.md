@@ -62,6 +62,10 @@ python3 -m oi_client
 - `character_size`: `big` or `small`
 - `show_progress_messages`: `true` or `false`
 - `show_celebrations`: `true` or `false`
+- `brightness`: `0`-`255`
+- `volume`: `0`-`100`
+- `led_enabled`: `true` or `false`
+- `mute_duration_hours`: `1`, `8`, or `24`
 
 Changes made in the Settings menu are persisted automatically to `config.json`.
 
@@ -104,6 +108,7 @@ The client now also sends periodic DATP `state` reports with any discoverable ba
 
 - `Surprise me ✨` home prompt that cycles through whimsical requests
 - `About Gateway` menu card showing `hello_ack` metadata like server name/session/agents
+- Settings menu now includes brightness, volume, LED, mute duration, diagnostics, and a small system submenu
 - secret button-code easter egg for Blob Party mode
 - playful connecting/waiting/response quips on-device
 

@@ -154,6 +154,10 @@ _ASCII_FRAMES_SMALL: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "blocked": (("(o_o)⊘",), ("(>_<)⊘",)),
 }
 
+_BRIGHTNESS_PRESETS = (64, 128, 192, 255)
+_VOLUME_PRESETS = (0, 25, 50, 75, 100)
+_MUTE_DURATION_PRESETS = (1, 8, 24)
+
 
 def _coerce_int(value: object, default: int) -> int:
     try:
@@ -171,6 +175,10 @@ class HandheldApp:
         character_size: str | None = None,
         show_progress_messages: bool = True,
         show_celebrations: bool = True,
+        brightness: int = 255,
+        volume: int = 80,
+        led_enabled: bool = True,
+        mute_duration_hours: int = 24,
         settings_persist: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         self.gateway_url = gateway_url
@@ -214,7 +222,20 @@ class HandheldApp:
         self._menu_idx = 0
         self._menu_mode = "main"
         self._menu_main_items = ["About Gateway", "Reload", "Reconnect", "Quit"]
-        self._menu_settings_items = ["Character Size", "Mute", "Show Progress", "Show Celebrations", "Back"]
+        self._menu_settings_items = [
+            "Character Size",
+            "Brightness",
+            "Volume",
+            "LED",
+            "Mute Duration",
+            "Mute",
+            "Show Progress",
+            "Show Celebrations",
+            "Diagnostics",
+            "System",
+            "Back",
+        ]
+        self._menu_system_items = ["Reboot", "Shutdown", "Back"]
 
         # Delight / easter eggs
         self._secret_tracker = SecretTracker()
@@ -237,9 +258,15 @@ class HandheldApp:
             size_value = "small"
         self._character_size = size_value if size_value in {"big", "small"} else "big"
         self._settings_persist = settings_persist
+        self._mute_duration_hours = _coerce_int(mute_duration_hours, 24)
+        if self._mute_duration_hours not in _MUTE_DURATION_PRESETS:
+            self._mute_duration_hours = 24
 
         # Device command / telemetry state
         self._device_control = DeviceController()
+        self._device_control.apply("device.set_brightness", {"value": _coerce_int(brightness, 255)})
+        self._device_control.apply("device.set_volume", {"level": _coerce_int(volume, 80)})
+        self._device_control.apply("device.set_led", {"enabled": bool(led_enabled)})
         self._telemetry = TelemetryCollector()
         self._next_state_report_at = 0.0
         self._state_report_interval_s = 10.0
@@ -584,51 +611,104 @@ class HandheldApp:
                 logger.warning("Exiting due to B in %s mode", self._ui_mode)
                 self._running = False
 
+    def _cycle_preset(self, current: int, presets: tuple[int, ...]) -> int:
+        for preset in presets:
+            if current < preset:
+                return preset
+        return presets[0]
+
+    def _brightness_label(self) -> str:
+        return f"{round((self._device_control.brightness / 255) * 100):d}%"
+
+    def _mute_duration_label(self) -> str:
+        return f"{self._mute_duration_hours}h"
+
+    def _show_card_message(self, title: str, body: str) -> None:
+        self._card.title = title
+        self._card.body = body
+        self._card_scroll = 0
+        self._ui_mode = UIMode.CARD
+
+    def _show_diagnostics(self) -> None:
+        telemetry = self._telemetry.collect(
+            mode=self._ui_mode.value,
+            muted_until=self._device_control.muted_until,
+            audio_cache_used_bytes=sum(os.path.getsize(path) for path in self._response_audio.values() if os.path.exists(path)),
+        )
+        lines = [
+            f"online: {'yes' if self._online else 'no'}",
+            f"gateway: {self.gateway_url}",
+            f"brightness: {self._brightness_label()} ({self._device_control.brightness})",
+            f"volume: {self._device_control.volume}%",
+            f"led: {'on' if self._device_control.led_enabled else 'off'}",
+            f"mute preset: {self._mute_duration_label()}",
+            f"muted: {self._device_control.muted_until or 'no'}",
+            f"audio cache files: {len(self._response_audio)}",
+        ]
+        if "battery_percent" in telemetry:
+            lines.append(f"battery: {telemetry['battery_percent']}%")
+        if "charging" in telemetry:
+            lines.append(f"charging: {'yes' if telemetry['charging'] else 'no'}")
+        if "wifi_rssi" in telemetry:
+            lines.append(f"wifi: {telemetry['wifi_rssi']} dBm")
+        if "heap_free" in telemetry:
+            lines.append(f"free mem: {telemetry['heap_free']}")
+        lines.append(f"uptime: {telemetry.get('uptime_s', 0)}s")
+        self._show_card_message("Diagnostics", "\n".join(lines))
+
     async def _handle_menu(self, name: str) -> None:
         menu_items = self._menu_items()
         if name == "a":
             item = menu_items[self._menu_idx]
             if item == "About Gateway":
-                self._card.title = "Gateway"
-                self._card.body = "\n".join(format_gateway_about(self.datp.server_info if self.datp else None))
-                self._card_scroll = 0
-                self._ui_mode = UIMode.CARD
+                self._show_card_message("Gateway", "\n".join(format_gateway_about(self.datp.server_info if self.datp else None)))
             elif item == "Character Size":
                 self._character_size = "small" if self._character_size == "big" else "big"
                 self._persist_settings()
-                self._card.title = "Character Size"
-                self._card.body = f"Set to {self._character_size}"
-                self._card_scroll = 0
-                self._ui_mode = UIMode.CARD
+                self._show_card_message("Character Size", f"Set to {self._character_size}")
+            elif item == "Brightness":
+                value = self._cycle_preset(self._device_control.brightness, _BRIGHTNESS_PRESETS)
+                self._device_control.apply("device.set_brightness", {"value": value})
+                self._persist_settings()
+                self._show_card_message("Brightness", f"Set to {self._brightness_label()} ({value})")
+            elif item == "Volume":
+                value = self._cycle_preset(self._device_control.volume, _VOLUME_PRESETS)
+                self._device_control.apply("device.set_volume", {"level": value})
+                self._persist_settings()
+                self._show_card_message("Volume", f"Set to {self._device_control.volume}%")
+            elif item == "LED":
+                enabled = not self._device_control.led_enabled
+                self._device_control.apply("device.set_led", {"enabled": enabled})
+                self._persist_settings()
+                self._show_card_message("LED", f"Set to {'on' if enabled else 'off'}")
+            elif item == "Mute Duration":
+                self._mute_duration_hours = self._cycle_preset(self._mute_duration_hours, _MUTE_DURATION_PRESETS)
+                self._persist_settings()
+                self._show_card_message("Mute Duration", f"Set to {self._mute_duration_label()}")
             elif item == "Mute":
                 if self._device_control.is_muted():
                     self._device_control.clear_mute()
-                    self._card.title = "Mute"
-                    self._card.body = "Audio unmuted"
+                    self._show_card_message("Mute", "Audio unmuted")
                 else:
-                    until = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+                    until = (datetime.now(timezone.utc) + timedelta(hours=self._mute_duration_hours)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
                     self._device_control.apply("device.mute_until", {"until": until})
                     self.audio.stop()
-                    self._card.title = "Mute"
-                    self._card.body = f"Muted until {self._device_control.muted_until}"
-                self._card_scroll = 0
-                self._ui_mode = UIMode.CARD
+                    self._show_card_message("Mute", f"Muted until {self._device_control.muted_until}")
             elif item == "Show Progress":
                 self._show_progress_messages = not self._show_progress_messages
                 self._persist_settings()
-                self._card.title = "Show Progress"
-                self._card.body = f"Set to {'on' if self._show_progress_messages else 'off'}"
-                self._card_scroll = 0
-                self._ui_mode = UIMode.CARD
+                self._show_card_message("Show Progress", f"Set to {'on' if self._show_progress_messages else 'off'}")
             elif item == "Show Celebrations":
                 self._show_celebrations = not self._show_celebrations
                 if not self._show_celebrations:
                     self._celebration_note = ""
                 self._persist_settings()
-                self._card.title = "Show Celebrations"
-                self._card.body = f"Set to {'on' if self._show_celebrations else 'off'}"
-                self._card_scroll = 0
-                self._ui_mode = UIMode.CARD
+                self._show_card_message("Show Celebrations", f"Set to {'on' if self._show_celebrations else 'off'}")
+            elif item == "Diagnostics":
+                self._show_diagnostics()
+            elif item == "System":
+                self._menu_mode = "system"
+                self._menu_idx = 0
             elif item == "Reload":
                 await self._reload_process()
             elif item == "Quit":
@@ -647,11 +727,23 @@ class HandheldApp:
                         return
                     self._online = self.datp.is_connected
                     self._ui_mode = UIMode.READY if self._online else UIMode.ERROR
+            elif item == "Reboot":
+                result = self._device_control.apply("device.reboot")
+                self._show_card_message("Reboot", result.message or ("ok" if result.ok else "reboot blocked"))
+            elif item == "Shutdown":
+                result = self._device_control.apply("device.shutdown")
+                self._show_card_message("Shutdown", result.message or ("ok" if result.ok else "shutdown blocked"))
             elif item == "Back":
-                self._menu_mode = "main"
+                if self._menu_mode == "system":
+                    self._menu_mode = "settings"
+                else:
+                    self._menu_mode = "main"
                 self._menu_idx = 0
         elif name == "b":
-            if self._menu_mode == "settings":
+            if self._menu_mode == "system":
+                self._menu_mode = "settings"
+                self._menu_idx = 0
+            elif self._menu_mode == "settings":
                 self._menu_mode = "main"
                 self._menu_idx = 0
             else:
@@ -664,6 +756,8 @@ class HandheldApp:
     def _menu_items(self) -> list[str]:
         if self._menu_mode == "settings":
             return self._menu_settings_items
+        if self._menu_mode == "system":
+            return self._menu_system_items
         return self._menu_main_items
 
     def _persist_settings(self) -> None:
@@ -674,6 +768,10 @@ class HandheldApp:
                 "character_size": self._character_size,
                 "show_progress_messages": self._show_progress_messages,
                 "show_celebrations": self._show_celebrations,
+                "brightness": self._device_control.brightness,
+                "volume": self._device_control.volume,
+                "led_enabled": self._device_control.led_enabled,
+                "mute_duration_hours": self._mute_duration_hours,
             })
         except Exception as exc:
             logger.warning("settings persistence failed: %s", exc)
@@ -983,6 +1081,14 @@ class HandheldApp:
                 marker = "> " if i == self._menu_idx else "  "
                 if item == "Character Size":
                     lines.append(f"{marker}{item}: {self._character_size}")
+                elif item == "Brightness":
+                    lines.append(f"{marker}{item}: {self._brightness_label()}")
+                elif item == "Volume":
+                    lines.append(f"{marker}{item}: {self._device_control.volume}%")
+                elif item == "LED":
+                    lines.append(f"{marker}{item}: {'on' if self._device_control.led_enabled else 'off'}")
+                elif item == "Mute Duration":
+                    lines.append(f"{marker}{item}: {self._mute_duration_label()}")
                 elif item == "Mute":
                     lines.append(f"{marker}{item}: {'on' if self._device_control.is_muted() else 'off'}")
                 elif item == "Show Progress":
@@ -991,7 +1097,7 @@ class HandheldApp:
                     lines.append(f"{marker}{item}: {'on' if self._show_celebrations else 'off'}")
                 else:
                     lines.append(f"{marker}{item}")
-            menu_title = "Settings" if self._menu_mode == "settings" else "Menu"
+            menu_title = "Settings" if self._menu_mode == "settings" else "System" if self._menu_mode == "system" else "Menu"
             self.renderer.draw_card(menu_title, lines, 0, ascii_bg_lines=blob)
 
         elif self._ui_mode == UIMode.ERROR:
