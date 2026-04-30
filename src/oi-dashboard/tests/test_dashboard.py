@@ -82,14 +82,32 @@ class TestIndexEndpoint:
         assert "<html" in content.lower() or "<!doctype" in content.lower()
         assert "Dashboard" in content
 
-    async def test_index_falls_back_to_inline_html_when_static_file_missing(self, dashboard, monkeypatch):
-        """Index endpoint should use fallback HTML when the static file is unavailable."""
-        monkeypatch.setattr(dashboard_module, "STATIC_DIR", dashboard_module.STATIC_DIR / "missing-for-test")
-
+    async def test_index_uses_the_shared_browser_shell(self, dashboard):
+        """Index endpoint should serve the shared browser shell."""
         content = await retry_request(lambda: fetch_text(dashboard, "/"))
 
         assert "<html" in content.lower() or "<!doctype" in content.lower()
+        assert 'href="/dashboard-shell.css"' in content
+        assert 'src="/dashboard-app.js"' in content
+
+
+class TestBrowserAppEndpoint:
+    async def test_browser_app_serves_shared_dashboard_js(self, dashboard):
+        """Browser app route should serve the shared dashboard client logic."""
+        content = await retry_request(lambda: fetch_text(dashboard, "/dashboard-app.js"))
+
         assert "EventSource('/events')" in content
+        assert "switch (message.type)" in content
+        assert "function applyDevicePatch(deviceMap, deviceId, patch)" in content
+        assert "function reduceEvent(currentState, message)" in content
+        assert "function createDashboardStore(initialState)" in content
+
+    async def test_browser_shell_serves_shared_dashboard_css(self, dashboard):
+        """Browser shell route should serve the shared dashboard styling."""
+        content = await retry_request(lambda: fetch_text(dashboard, "/dashboard-shell.css"))
+
+        assert ".status-bar" in content
+        assert ".device" in content
 
 
 class TestSSEEndpoint:
@@ -217,7 +235,7 @@ class TestSnapshot:
             "cleaned": "Test transcript",
         })
         
-        snapshot = dashboard._get_state_snapshot()
+        snapshot = dashboard.state.snapshot()
         
         assert "devices" in snapshot
         assert "transcripts" in snapshot

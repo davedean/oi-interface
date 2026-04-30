@@ -4,17 +4,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 import aiohttp
 from aiohttp import web
 
-from .fallback_html import INLINE_DASHBOARD_HTML
+from .browser_app import DASHBOARD_APP_JS
+from .browser_shell import DASHBOARD_SHELL_CSS, dashboard_shell_html
+from .event_payloads import normalize_agent_response_payload, normalize_transcript_payload
 from .gateway_api import GatewayApi
 from .poller import DashboardPoller
 from .sse import SseHub
-from .state import DashboardState, DeviceState, TranscriptEntry
+from .state import DashboardState
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "localhost"
 DEFAULT_API_PORT = 8788
 DEFAULT_DASHBOARD_PORT = 8789
-STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 
 
 class Dashboard:
@@ -105,6 +105,7 @@ class Dashboard:
             except asyncio.CancelledError:
                 pass
         await self._sse_hub.close()
+        await self._gateway_api.close()
         if self._runner:
             await self._runner.cleanup()
         logger.info("Dashboard stopped")
@@ -118,12 +119,12 @@ class Dashboard:
         assert self._app is not None
         self._app.router.add_get("/", self._index)
         self._app.router.add_get("/events", self._events_sse)
+        self._app.router.add_get("/dashboard-app.js", self._dashboard_app_js)
+        self._app.router.add_get("/dashboard-shell.css", self._dashboard_shell_css)
         self._app.router.add_get("/api/devices", self._api_devices)
         self._app.router.add_get("/api/devices/{device_id}", self._api_device_info)
         self._app.router.add_get("/api/transcripts", self._api_transcripts)
         self._app.router.add_get("/api/health", self._api_health)
-        if STATIC_DIR.exists():
-            self._app.router.add_static("/static", str(STATIC_DIR))
 
     async def _index(self, _request: web.Request) -> web.Response:
         """Serve the dashboard HTML page."""
@@ -134,6 +135,14 @@ class Dashboard:
         response = await self._sse_hub.connect(request, self._state.snapshot())
         await self._sse_hub.keepalive(response, is_running=lambda: self._running)
         return response
+
+    async def _dashboard_app_js(self, _request: web.Request) -> web.Response:
+        """Serve the shared browser-side dashboard application logic."""
+        return web.Response(text=DASHBOARD_APP_JS, content_type="application/javascript")
+
+    async def _dashboard_shell_css(self, _request: web.Request) -> web.Response:
+        """Serve the shared dashboard shell styling."""
+        return web.Response(text=DASHBOARD_SHELL_CSS, content_type="text/css")
 
     async def _send_sse_event(self, response: web.StreamResponse, event_type: str, data: Any) -> None:
         """Send an SSE event to a client."""
@@ -179,36 +188,8 @@ class Dashboard:
         )
 
     def _load_index_html(self) -> str:
-        """Return the static dashboard page or the inline fallback."""
-        html_path = STATIC_DIR / "index.html"
-        try:
-            return html_path.read_text()
-        except FileNotFoundError:
-            return INLINE_DASHBOARD_HTML
-
-    # ------------------------------------------------------------------
-    # State Management
-    # ------------------------------------------------------------------
-
-    def _get_state_snapshot(self) -> dict[str, Any]:
-        """Get current state for initial SSE connection."""
-        return self._state.snapshot()
-
-    def _update_device_state(self, device_id: str, info: dict[str, Any]) -> None:
-        """Update or create a device entry."""
-        self._state.update_device_state(device_id, info)
-
-    def _device_payload(self, device: DeviceState) -> dict[str, Any]:
-        """Serialize a device state for HTTP/SSE payloads."""
-        return self._state.device_payload(device)
-
-    def _transcript_payload(self, entry: TranscriptEntry) -> dict[str, str]:
-        """Serialize a transcript entry for HTTP/SSE payloads."""
-        return self._state.transcript_payload(entry)
-
-    def _transcript_payloads(self, entries: list[TranscriptEntry]) -> list[dict[str, str]]:
-        """Serialize a list of transcript entries."""
-        return self._state.transcript_payloads(entries)
+        """Return the canonical dashboard HTML shell."""
+        return dashboard_shell_html()
 
     # ------------------------------------------------------------------
     # Polling Loop
@@ -251,13 +232,16 @@ class Dashboard:
 
     def on_transcript(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle transcript event."""
-        event_payload = self._state.record_transcript(device_id, payload)
+        event_payload = self._state.record_transcript(device_id, normalize_transcript_payload(payload))
         if event_payload is not None:
             self._broadcast("transcript", event_payload)
 
     def on_agent_response(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle agent response event."""
-        self._broadcast("agent_response", self._state.record_agent_response(device_id, payload))
+        self._broadcast(
+            "agent_response",
+            self._state.record_agent_response(device_id, normalize_agent_response_payload(payload)),
+        )
 
     def on_audio_delivered(self, device_id: str, payload: dict[str, Any]) -> None:
         """Handle audio delivered event."""

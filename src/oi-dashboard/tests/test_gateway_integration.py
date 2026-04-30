@@ -156,12 +156,13 @@ class TestDashboardIntegration:
         integration.start()
         
         # Add transcript first
-        dashboard.on_transcript("test-device", {"cleaned": "Hello"})
+        dashboard.on_transcript("test-device", {"cleaned": "Hello", "stream_id": "stream-1"})
         
         # Then agent responds
         mock_bus.emit("agent_response", "test-device", {
             "transcript": "Hello",
             "response_text": "Hi there!",
+            "stream_id": "stream-1",
         })
         
         assert dashboard.state.transcripts[0].response == "Hi there!"

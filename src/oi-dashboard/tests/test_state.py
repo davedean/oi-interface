@@ -1,6 +1,7 @@
 """Unit tests for dashboard projection state."""
 from __future__ import annotations
 
+from oi_dashboard.event_payloads import normalize_agent_response_payload, normalize_transcript_payload
 from oi_dashboard.state import DashboardState
 
 
@@ -8,7 +9,7 @@ def test_snapshot_serializes_devices_and_transcripts() -> None:
     state = DashboardState(max_transcripts=5)
 
     state.record_device_online("device1", {"device_id": "device1", "device_type": "stick"})
-    state.record_transcript("device1", {"cleaned": "Hello"})
+    state.record_transcript("device1", normalize_transcript_payload({"cleaned": "Hello"}))
 
     snapshot = state.snapshot()
 
@@ -46,9 +47,9 @@ def test_mark_missing_devices_offline_returns_events() -> None:
 def test_record_transcript_trims_and_returns_payload() -> None:
     state = DashboardState(max_transcripts=2)
 
-    first_payload = state.record_transcript("device1", {"cleaned": "one"})
-    state.record_transcript("device1", {"cleaned": "two"})
-    third_payload = state.record_transcript("device1", {"cleaned": "three"})
+    first_payload = state.record_transcript("device1", normalize_transcript_payload({"cleaned": "one"}))
+    state.record_transcript("device1", normalize_transcript_payload({"cleaned": "two"}))
+    third_payload = state.record_transcript("device1", normalize_transcript_payload({"cleaned": "three"}))
 
     assert first_payload is not None
     assert third_payload is not None
@@ -59,15 +60,23 @@ def test_record_transcript_trims_and_returns_payload() -> None:
 
 def test_record_agent_response_updates_matching_transcript() -> None:
     state = DashboardState()
-    state.record_transcript("device1", {"cleaned": "Hello"})
+    transcript_payload = state.record_transcript(
+        "device1",
+        normalize_transcript_payload({"cleaned": "Hello", "stream_id": "stream-1"}),
+    )
 
     payload = state.record_agent_response(
         "device1",
-        {"transcript": "Hello", "response_text": "Hi there!"},
+        normalize_agent_response_payload({"transcript": "Hello", "response_text": "Hi there!", "stream_id": "stream-1"}),
     )
 
+    assert transcript_payload is not None
+    assert transcript_payload["stream_id"] == "stream-1"
+    assert transcript_payload["conversation_id"] == "stream-1"
     assert state.transcripts[0].response == "Hi there!"
     assert payload["response"] == "Hi there!"
+    assert payload["stream_id"] == "stream-1"
+    assert payload["conversation_id"] == "stream-1"
 
 
 def test_record_state_update_merges_existing_device_state() -> None:
@@ -80,10 +89,18 @@ def test_record_state_update_merges_existing_device_state() -> None:
     assert payload == {"device_id": "device1", "state": {"mode": "listening", "battery_percent": 80}}
 
 
+def test_record_state_update_materializes_unknown_devices() -> None:
+    state = DashboardState()
+
+    state.record_state_updated("device1", {"mode": "thinking"})
+
+    assert state.devices["device1"].state == {"mode": "thinking"}
+
+
 def test_transcript_windows_live_behind_state_interface() -> None:
     state = DashboardState(max_transcripts=10, snapshot_transcript_limit=2, api_transcript_limit=3)
     for index in range(4):
-        state.record_transcript("device1", {"cleaned": f"Transcript {index}"})
+        state.record_transcript("device1", normalize_transcript_payload({"cleaned": f"Transcript {index}"}))
 
     snapshot = state.snapshot()
     api_payload = state.transcript_listing()

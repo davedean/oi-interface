@@ -31,6 +31,7 @@ class TranscriptEntry:
     transcript: str
     response: str = ""
     stream_id: str = ""
+    conversation_id: str = ""
 
 
 class DashboardState:
@@ -59,6 +60,7 @@ class DashboardState:
             },
             "transcripts": self.transcript_payloads(self.transcripts[-self.snapshot_transcript_limit:]),
             "timestamp": self._now_factory(),
+            "transcript_limit": self.max_transcripts,
         }
 
     def update_device_state(self, device_id: str, info: dict[str, Any]) -> DeviceState:
@@ -90,42 +92,64 @@ class DashboardState:
 
     def record_state_updated(self, device_id: str, state: dict[str, Any]) -> dict[str, Any]:
         """Apply a device state update and return its broadcast payload."""
-        if device_id in self.devices:
-            self.devices[device_id].state.update(state)
+        if device_id not in self.devices:
+            self.devices[device_id] = DeviceState(device_id=device_id)
+        self.devices[device_id].state.update(state)
         return {"device_id": device_id, "state": state}
 
     def record_transcript(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Apply a transcript event and return its broadcast payload."""
-        transcript = payload.get("cleaned", "") or payload.get("text", "")
+        transcript = str(payload.get("transcript") or "")
         if not transcript:
             return None
 
+        timestamp = self._now_factory()
+        stream_id = str(payload.get("stream_id") or "")
         entry = TranscriptEntry(
-            timestamp=self._now_factory(),
+            timestamp=timestamp,
             device_id=device_id,
             transcript=transcript,
             response="",
-            stream_id=payload.get("stream_id", ""),
+            stream_id=stream_id,
+            conversation_id=str(payload.get("conversation_id") or stream_id or f"{device_id}:{timestamp}"),
         )
         self.transcripts.append(entry)
         overflow = len(self.transcripts) - self.max_transcripts
         if overflow > 0:
             del self.transcripts[:overflow]
-        return self.timestamped_device_event(device_id, transcript=transcript)
-
-    def record_agent_response(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Apply an agent response event and return its broadcast payload."""
-        transcript = payload.get("transcript", "")
-        response = payload.get("response_text", "")
-        if transcript and self.transcripts:
-            for entry in reversed(self.transcripts):
-                if entry.device_id == device_id and entry.transcript == transcript:
-                    entry.response = response
-                    break
         return self.timestamped_device_event(
             device_id,
             transcript=transcript,
-            response=response,
+            stream_id=entry.stream_id,
+            conversation_id=entry.conversation_id,
+        )
+
+    def record_agent_response(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply an agent response event and return its broadcast payload."""
+        transcript = str(payload.get("transcript") or "")
+        response = str(payload.get("response") or "")
+        stream_id = str(payload.get("stream_id") or "")
+        conversation_id = str(payload.get("conversation_id") or "")
+        matched_entry: TranscriptEntry | None = None
+        if conversation_id and self.transcripts:
+            for entry in reversed(self.transcripts):
+                if entry.device_id == device_id and entry.conversation_id == conversation_id:
+                    matched_entry = entry
+                    break
+
+        if matched_entry is not None:
+            matched_entry.response = response
+            return self.transcript_payload(matched_entry)
+
+        return self.transcript_payload(
+            TranscriptEntry(
+                timestamp=self._now_factory(),
+                device_id=device_id,
+                transcript=transcript,
+                response=response,
+                stream_id=stream_id,
+                conversation_id=conversation_id or f"{device_id}:{self._now_factory()}",
+            )
         )
 
     def record_audio_delivered(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +209,7 @@ class DashboardState:
             "transcript": entry.transcript,
             "response": entry.response,
             "stream_id": entry.stream_id,
+            "conversation_id": entry.conversation_id,
         }
 
     def transcript_payloads(self, entries: list[TranscriptEntry]) -> list[dict[str, str]]:

@@ -25,6 +25,8 @@ oi-dashboard --api-url http://localhost:8788 --host localhost --port 8789
 
 Open `http://localhost:8789`.
 
+The dashboard serves shared browser logic from `/dashboard-app.js` and shared shell styling from `/dashboard-shell.css`; both the main static page and the inline fallback page load those same browser modules.
+
 If your gateway runs elsewhere, change `--api-url`.
 
 ## Development

@@ -60,8 +60,8 @@ class DashboardIntegration:
             "registry.device_offline": self._handle_device_offline,
             "registry.state_updated": self._handle_registry_state_updated,
             "state": lambda device_id, payload: self._dashboard.on_state_updated(device_id, payload),
-            "transcript": lambda device_id, payload: self._dashboard.on_transcript(device_id, payload),
-            "agent_response": lambda device_id, payload: self._dashboard.on_agent_response(device_id, payload),
+            "transcript": self._handle_transcript,
+            "agent_response": self._handle_agent_response,
             "audio_delivered": lambda device_id, payload: self._dashboard.on_audio_delivered(device_id, payload),
         }
 
@@ -92,3 +92,11 @@ class DashboardIntegration:
     def _handle_registry_state_updated(self, device_id: str, payload: dict[str, Any]) -> None:
         """Forward registry state payloads using the inner state object."""
         self._dashboard.on_state_updated(device_id, payload.get("state", {}))
+
+    def _handle_transcript(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward transcript payloads to the dashboard sink."""
+        self._dashboard.on_transcript(device_id, payload)
+
+    def _handle_agent_response(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Forward agent response payloads to the dashboard sink."""
+        self._dashboard.on_agent_response(device_id, payload)

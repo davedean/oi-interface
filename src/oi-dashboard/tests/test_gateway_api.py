@@ -26,6 +26,7 @@ class FakeSession:
     def __init__(self, response: FakeResponse, calls: list[tuple[str, float | None]]) -> None:
         self._response = response
         self._calls = calls
+        self.closed = False
 
     async def __aenter__(self) -> "FakeSession":
         return self
@@ -36,6 +37,9 @@ class FakeSession:
     def get(self, url: str, timeout: aiohttp.ClientTimeout):
         self._calls.append((url, timeout.total))
         return self._response
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 @pytest.mark.asyncio
@@ -87,3 +91,20 @@ async def test_get_health_uses_health_route(monkeypatch: pytest.MonkeyPatch) -> 
     assert status == 200
     assert body == {"devices_online": 2}
     assert calls == [("http://gateway:8788/api/health", 5)]
+
+
+@pytest.mark.asyncio
+async def test_gateway_api_reuses_injected_session_without_owning_it() -> None:
+    calls: list[tuple[str, float | None]] = []
+    session = FakeSession(FakeResponse(200, {"devices": []}), calls)
+    api = GatewayApi("http://gateway:8788", session=session)
+
+    await api.get_devices()
+    await api.get_health()
+    await api.close()
+
+    assert calls == [
+        ("http://gateway:8788/api/devices", 5),
+        ("http://gateway:8788/api/health", 5),
+    ]
+    assert session.closed is False
