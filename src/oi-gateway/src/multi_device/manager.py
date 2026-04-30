@@ -324,11 +324,9 @@ class MultiDeviceManager:
         # Device groups
         self._groups: dict[str, DeviceGroup] = {}
 
-        # Load balancer
+        # Load balancer owns the shared device-load map used by manager queries.
         self._load_balancer = LoadBalancer()
-
-        # Device load tracking
-        self._device_loads: dict[str, DeviceLoad] = {}
+        self._device_loads = self._load_balancer._device_loads
 
     # -------------------------------------------------------------------------
     # Affinity Management
@@ -580,7 +578,6 @@ class MultiDeviceManager:
             network_load=network_load,
             last_updated=self._get_time(),
         )
-        self._device_loads[device_id] = load
         self._load_balancer.update_load(device_id, load)
 
     def get_device_load(self, device_id: str) -> DeviceLoad | None:
