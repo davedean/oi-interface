@@ -4,7 +4,10 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import os
 import struct
+import subprocess
+import tempfile
 import time
 import uuid
 import wave
@@ -237,6 +240,29 @@ def _make_minimal_wav() -> bytes:
     wav += struct.pack("<I", data_size)
     wav += b"\x00" * data_size  # silent samples
     return wav
+
+
+class EspeakNgTtsBackend:
+    """Text-to-speech using espeak-ng CLI."""
+
+    def __init__(self, voice: str = "en") -> None:
+        self._voice = voice
+
+    def synthesize(self, text: str) -> bytes:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            out = tmp.name
+        try:
+            subprocess.run(
+                ["espeak-ng", "-v", self._voice, "-w", out, text],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            with open(out, "rb") as f:
+                return f.read()
+        finally:
+            if os.path.exists(out):
+                os.unlink(out)
 
 
 class StubTtsBackend:

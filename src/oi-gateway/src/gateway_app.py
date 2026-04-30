@@ -13,8 +13,10 @@ from audio import (
     AudioDeliveryPipeline,
     StubTtsBackend,
     PiperTtsBackend,
+    EspeakNgTtsBackend,
     StreamAccumulator,
     FasterWhisperBackend,
+    OpenAiWhisperBackend,
     StubSttBackend,
 )
 from text import TextDeliveryPipeline
@@ -34,12 +36,22 @@ def _build_tts_backend() -> object:
 
     OI_TTS_BACKEND values:
     - piper (default)
+    - espeak-ng
     - stub
     """
     backend = os.getenv("OI_TTS_BACKEND", "piper").strip().lower()
     if backend == "stub":
         logger.warning("Using StubTtsBackend (silent test audio)")
         return StubTtsBackend()
+    if backend == "espeak-ng":
+        try:
+            voice = os.getenv("OI_TTS_VOICE", "en")
+            tts = EspeakNgTtsBackend(voice=voice)
+            logger.info("Using EspeakNgTtsBackend voice=%s", voice)
+            return tts
+        except Exception as exc:
+            logger.warning("espeak-ng TTS unavailable (%s); falling back to StubTtsBackend", exc)
+            return StubTtsBackend()
 
     try:
         voice = os.getenv("OI_TTS_VOICE", "en_US-lessac-medium")
@@ -56,13 +68,24 @@ def _build_stt_backend() -> object:
     """Select STT backend from env, defaulting to faster-whisper when available.
 
     OI_STT_BACKEND values:
-    - whisper (default)
+    - whisper (default, faster-whisper local)
+    - openai
     - stub
     """
     backend = os.getenv("OI_STT_BACKEND", "whisper").strip().lower()
     if backend == "stub":
         logger.warning("Using StubSttBackend")
         return StubSttBackend()
+    if backend == "openai":
+        try:
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            model = os.getenv("OI_OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
+            stt = OpenAiWhisperBackend(api_key=api_key, model=model)
+            logger.info("Using OpenAiWhisperBackend model=%s", model)
+            return stt
+        except Exception as exc:
+            logger.warning("OpenAI STT unavailable (%s); falling back to StubSttBackend", exc)
+            return StubSttBackend()
 
     try:
         model = os.getenv("OI_STT_MODEL", "base.en")

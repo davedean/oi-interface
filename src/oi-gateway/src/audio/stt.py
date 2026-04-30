@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import re
 import struct
 import time
+import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -193,6 +195,58 @@ class FasterWhisperBackend:
         """
         text, _ = self.transcribe(pcm_bytes, sample_rate)
         return text
+
+
+class OpenAiWhisperBackend:
+    """Speech-to-text using OpenAI audio transcription API."""
+
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini-transcribe") -> None:
+        if not api_key:
+            raise ValueError("OpenAI API key is required")
+        self._api_key = api_key
+        self._model_name = model
+
+    def transcribe(self, pcm_bytes: bytes, sample_rate: int = 16000) -> tuple[str, SttMetrics]:
+        duration_seconds = len(pcm_bytes) / (sample_rate * 2)
+        wav_bytes = pcm_to_wav(pcm_bytes, sample_rate=sample_rate, channels=1, bits=16)
+
+        boundary = "----oi-gateway-boundary"
+        parts = [
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{self._model_name}\r\n",
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n",
+            (
+                f"--{boundary}\r\n"
+                "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n"
+                "Content-Type: audio/wav\r\n\r\n"
+            ),
+        ]
+        body = b"".join(p.encode("utf-8") for p in parts) + wav_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/audio/transcriptions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
+            method="POST",
+        )
+
+        start_time = time.perf_counter()
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        inference_time_ms = (time.perf_counter() - start_time) * 1000
+
+        text = str(payload.get("text", "")).strip()
+        metrics = SttMetrics(
+            duration_seconds=duration_seconds,
+            text_length=len(text),
+            word_count=len(text.split()) if text else 0,
+            language="en",
+            model=self._model_name,
+            inference_time_ms=inference_time_ms,
+        )
+        return text, metrics
 
 
 class StubSttBackend:

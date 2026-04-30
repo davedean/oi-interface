@@ -3,6 +3,7 @@ from .delivery import AudioDeliveryPipeline
 from .pipeline import StreamAccumulator
 from .stt import (
     FasterWhisperBackend,
+    OpenAiWhisperBackend,
     SttMetrics,
     StubSttBackend,
     clean_transcript,
@@ -11,6 +12,7 @@ from .stt import (
 from .tts import (
     AudioQualityMetrics,
     AudioValidationResult,
+    EspeakNgTtsBackend,
     PiperTtsBackend,
     StubTtsBackend,
     TtsBackend,
@@ -31,6 +33,7 @@ __all__ = [
     "AudioDeliveryPipeline",
     # STT
     "FasterWhisperBackend",
+    "OpenAiWhisperBackend",
     "SttMetrics",
     "StubSttBackend",
     "StreamAccumulator",
@@ -39,6 +42,7 @@ __all__ = [
     # TTS
     "AudioQualityMetrics",
     "AudioValidationResult",
+    "EspeakNgTtsBackend",
     "PiperTtsBackend",
     "StubTtsBackend",
     "TtsBackend",
