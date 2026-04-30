@@ -25,6 +25,39 @@ from character_packs import (
 )
 
 
+EXPECTED_REQUIRED_STATES = [
+    "idle",
+    "listening",
+    "uploading",
+    "thinking",
+    "response_cached",
+    "playing",
+    "confirm",
+    "muted",
+    "offline",
+    "error",
+    "safe_mode",
+    "task_running",
+    "blocked",
+]
+
+COMPLETE_PACK_STATES = {
+    "idle": StateConfig(sprite="idle.png", label="Ready"),
+    "listening": StateConfig(sprite="listen.png", label="Listening"),
+    "uploading": StateConfig(sprite="upload.png", label="Uploading"),
+    "thinking": StateConfig(sprite="think.png", label="Thinking"),
+    "response_cached": StateConfig(sprite="ready.png", label="Ready"),
+    "playing": StateConfig(sprite="speak.png", label="Speaking"),
+    "confirm": StateConfig(sprite="confirm.png", label="Confirm"),
+    "muted": StateConfig(sprite="muted.png", label="Muted"),
+    "offline": StateConfig(sprite="offline.png", label="Offline"),
+    "error": StateConfig(sprite="error.png", label="Error"),
+    "safe_mode": StateConfig(sprite="safe.png", label="Safe Mode"),
+    "task_running": StateConfig(sprite="task.png", label="Working"),
+    "blocked": StateConfig(sprite="blocked.png", label="Blocked"),
+}
+
+
 # ------------------------------------------------------------------
 # StateConfig tests
 # ------------------------------------------------------------------
@@ -133,22 +166,7 @@ def test_character_pack_overlays_optional():
 
 def test_semantic_states_defined():
     """All required semantic states are defined in the enum."""
-    required = [
-        "idle",
-        "listening",
-        "uploading",
-        "thinking",
-        "response_cached",
-        "playing",
-        "confirm",
-        "muted",
-        "offline",
-        "error",
-        "safe_mode",
-        "task_running",
-        "blocked",
-    ]
-    for state in required:
+    for state in EXPECTED_REQUIRED_STATES:
         assert hasattr(SemanticState, state.upper())
         assert SemanticState[state.upper()].value == state
 
@@ -173,22 +191,7 @@ def test_overlay_states_defined():
 
 def test_required_states_list():
     """REQUIRED_STATES contains all required state names."""
-    expected = [
-        "idle",
-        "listening",
-        "uploading",
-        "thinking",
-        "response_cached",
-        "playing",
-        "confirm",
-        "muted",
-        "offline",
-        "error",
-        "safe_mode",
-        "task_running",
-        "blocked",
-    ]
-    assert REQUIRED_STATES == expected
+    assert REQUIRED_STATES == EXPECTED_REQUIRED_STATES
 
 
 # ------------------------------------------------------------------
@@ -445,27 +448,11 @@ def test_service_validate_pack_complete(tmp_path):
     store = CharacterPackStore(db_path)
     service = CharacterPackService(store)
 
-    # Build a complete pack with all required states
-    states = {
-        "idle": StateConfig(sprite="idle.png", label="Ready"),
-        "listening": StateConfig(sprite="listen.png", label="Listening"),
-        "uploading": StateConfig(sprite="upload.png", label="Uploading"),
-        "thinking": StateConfig(sprite="think.png", label="Thinking"),
-        "response_cached": StateConfig(sprite="ready.png", label="Ready"),
-        "playing": StateConfig(sprite="speak.png", label="Speaking"),
-        "confirm": StateConfig(sprite="confirm.png", label="Confirm"),
-        "muted": StateConfig(sprite="muted.png", label="Muted"),
-        "offline": StateConfig(sprite="offline.png", label="Offline"),
-        "error": StateConfig(sprite="error.png", label="Error"),
-        "safe_mode": StateConfig(sprite="safe.png", label="Safe Mode"),
-        "task_running": StateConfig(sprite="task.png", label="Working"),
-        "blocked": StateConfig(sprite="blocked.png", label="Blocked"),
-    }
     pack = CharacterPack(
         pack_id="complete-pack",
         target="tiny_135x240",
         format="indexed_png",
-        states=states,
+        states=COMPLETE_PACK_STATES,
     )
     is_valid, errors = service.validate_pack(pack)
     assert is_valid is True
