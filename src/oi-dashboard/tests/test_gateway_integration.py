@@ -4,10 +4,7 @@ These tests use a mock EventBus to avoid requiring gateway dependencies.
 """
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock
-
-import pytest
 
 from oi_dashboard import DashboardIntegration
 from oi_dashboard.dashboard import Dashboard
@@ -30,21 +27,6 @@ class MockEventBus:
     def emit(self, event_type, device_id, payload):
         for sub in self._subscribers:
             sub(event_type, device_id, payload)
-
-
-@pytest.fixture
-async def dashboard():
-    """Create a dashboard instance."""
-    dash = Dashboard(
-        api_base_url="http://localhost:9999",
-        host="localhost",
-        port=0,
-        poll_interval=60.0,
-    )
-    await dash.start()
-    yield dash
-    await dash.stop()
-    await asyncio.sleep(0.05)
 
 
 def test_package_exports_dashboard_integration() -> None:

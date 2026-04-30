@@ -4,28 +4,8 @@ from __future__ import annotations
 import asyncio
 
 import aiohttp
-import pytest
-
 import oi_dashboard.dashboard as dashboard_module
 from oi_dashboard.dashboard import Dashboard
-
-
-@pytest.fixture
-async def dashboard():
-    """Create a dashboard instance with ephemeral port."""
-    dash = Dashboard(
-        api_base_url="http://localhost:9999",  # Non-existent API
-        host="localhost",
-        port=0,  # OS assigns free port
-        poll_interval=60.0,  # Disable polling during tests
-    )
-    await dash.start()
-    # Wait for server to be ready by attempting to connect
-    await asyncio.sleep(0.2)
-    yield dash
-    await dash.stop()
-    # Small delay for cleanup
-    await asyncio.sleep(0.1)
 
 
 async def retry_request(coro, max_attempts=15, delay=0.2):
