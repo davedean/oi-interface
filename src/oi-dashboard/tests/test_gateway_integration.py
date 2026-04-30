@@ -5,7 +5,7 @@ These tests use a mock EventBus to avoid requiring gateway dependencies.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
