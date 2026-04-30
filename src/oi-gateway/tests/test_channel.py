@@ -13,6 +13,7 @@ gateway_src = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(gateway_src))
 
 from channel import ChannelService, PiBackendError, StubPiBackend
+from channel.request_builder import build_agent_request_from_transcript, render_text_prompt
 from datp import EventBus
 from registry.models import DeviceInfo
 
@@ -180,7 +181,14 @@ def test_build_prompt_message_includes_transcript(stub_device):
     service = ChannelService(EventBus(), registry, backend)
 
     context = service._build_device_context("test-device")
-    message = service._build_prompt_message("turn off the lights", context)
+    message = render_text_prompt(
+        build_agent_request_from_transcript(
+            device_id="test-device",
+            stream_id=None,
+            transcript="turn off the lights",
+            device_context=context,
+        )
+    )
 
     assert "turn off the lights" in message
     assert "test-device" in message
@@ -195,7 +203,14 @@ def test_build_prompt_message_without_foreground(stub_device):
     service = ChannelService(EventBus(), registry, backend)
 
     context = service._build_device_context("test-device")
-    message = service._build_prompt_message("test", context)
+    message = render_text_prompt(
+        build_agent_request_from_transcript(
+            device_id="test-device",
+            stream_id=None,
+            transcript="test",
+            device_context=context,
+        )
+    )
 
     assert "(foreground)" not in message
 

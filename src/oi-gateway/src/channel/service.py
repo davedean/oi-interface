@@ -112,7 +112,7 @@ class ChannelService:
                 "backend_name": response.backend_name,
                 "session_key": response.session_key,
                 "correlation_id": response.correlation_id,
-                "streaming_used": response.streaming_used,  # Add streaming flag
+                "streaming_used": response.streaming_used,
             },
         )
         logger.info("Channel message processed", extra={**log_context, "elapsed_ms": elapsed_ms})
@@ -171,11 +171,10 @@ class ChannelService:
                 "backend_name": response.backend_name,
                 "session_key": response.session_key,
                 "correlation_id": response.correlation_id,
-                "streaming_used": response.streaming_used,  # Add streaming flag
+                "streaming_used": response.streaming_used,
             },
         )
 
-        # Only show card if streaming was NOT used (text was not already displayed via deltas)
         if self._command_dispatcher is not None and not response.streaming_used:
             logger.info("Non-streaming path: showing card for device %s", device_id)
             await self._command_dispatcher.show_card(
@@ -230,23 +229,6 @@ class ChannelService:
             streaming_used=True,
         )
 
-    def _build_prompt_message(self, transcript: str, device_context: dict[str, Any]) -> str:
-        request = build_agent_request_from_transcript(
-            device_id=str(device_context.get("source_device")),
-            stream_id=None,
-            transcript=transcript,
-            device_context=device_context,
-        )
-        return render_text_prompt(request)
-
-    def _build_text_prompt_message(self, text: str, device_context: dict[str, Any]) -> str:
-        request = build_agent_request_from_text_prompt(
-            device_id=str(device_context.get("source_device")),
-            text=text,
-            device_context=device_context,
-        )
-        return render_text_prompt(request)
-
     def _schedule_handler(self, handler, device_id: str, payload: dict[str, Any], warning_message: str) -> None:
         loop = asyncio.get_event_loop()
         if loop.is_running():
@@ -289,7 +271,6 @@ class ChannelService:
 
     async def _send_backend_request(self, request: AgentRequest) -> AgentResponse:
         """Send request to backend, using streaming if available."""
-        # First try streaming if available, otherwise fall back to non-streaming
         streaming_method = getattr(self._pi_backend, "send_request_streaming", None)
         if callable(streaming_method):
             logger.info("Using STREAMING path for device %s", request.source_device_id)
