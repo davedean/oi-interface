@@ -33,7 +33,5 @@ async def dashboard() -> Dashboard:
         poll_interval=60.0,
     )
     await dash.start()
-    await asyncio.sleep(0.2)
     yield dash
     await dash.stop()
-    await asyncio.sleep(0.1)

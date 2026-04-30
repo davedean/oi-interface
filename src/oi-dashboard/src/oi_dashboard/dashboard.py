@@ -122,10 +122,11 @@ class Dashboard:
                 await self._poll_task
             except asyncio.CancelledError:
                 pass
-        # Close all SSE connections
+        # Finish all SSE responses before cleaning up the runner.
         for client in list(self._sse_clients):
             try:
-                await client.close()
+                if client.prepared:
+                    await client.write_eof()
             except Exception:
                 pass
         if self._runner:
