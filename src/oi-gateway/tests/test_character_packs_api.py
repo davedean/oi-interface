@@ -14,7 +14,7 @@ import sys
 if str(gateway_src) not in sys.path:
     sys.path.insert(0, str(gateway_src))
 
-from datp import DATPServer, CommandDispatcher, EventBus
+from datp import CommandDispatcher, EventBus
 from datp.server import DATPServer
 from registry import DeviceStore, RegistryService
 from api import GatewayAPI
@@ -45,7 +45,7 @@ async def datp_server(registry):
         event_bus=registry._event_bus,
         registry=registry,
     )
-    task = asyncio.create_task(srv.start())
+    asyncio.create_task(srv.start())
     await asyncio.sleep(0.15)
     yield srv
     await srv.stop()
@@ -78,7 +78,6 @@ async def gateway_api(datp_server, pack_service):
     dispatcher = CommandDispatcher(datp_server)
     # Access the registry through datp_server to use the SAME instance
     # that devices register with when they connect.
-    registry = datp_server.registry
     api = GatewayAPI(
         datp_server=datp_server,
         command_dispatcher=dispatcher,

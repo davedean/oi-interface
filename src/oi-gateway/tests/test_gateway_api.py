@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -15,7 +14,7 @@ if str(gateway_src) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(gateway_src))
 
 from audio.tts import StubTtsBackend
-from datp import DATPServer, CommandDispatcher, EventBus
+from datp import CommandDispatcher, EventBus
 from datp.server import DATPServer
 from api import GatewayAPI
 from registry import DeviceStore, RegistryService
@@ -25,7 +24,7 @@ from registry import DeviceStore, RegistryService
 async def datp_server():
     """Start an ephemeral DATP server."""
     srv = DATPServer(host="localhost", port=0)
-    task = asyncio.create_task(srv.start())
+    asyncio.create_task(srv.start())
     await asyncio.sleep(0.15)
     yield srv
     await srv.stop()
@@ -51,7 +50,7 @@ async def gateway_api(tmp_path):
         event_bus=event_bus,
         registry=registry,
     )
-    datp_task = asyncio.create_task(datp_server.start())
+    asyncio.create_task(datp_server.start())
     await asyncio.sleep(0.15)
 
     # Create dispatcher and API

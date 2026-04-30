@@ -134,6 +134,9 @@ class GatewayAPI:
             status=status,
         )
 
+    def _format_utc_timestamp(self, value: datetime) -> str:
+        return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
     def _error_response(self, message: str, status: int = 400) -> web.Response:
         return self._json_response({"error": message}, status)
 
@@ -232,10 +235,9 @@ class GatewayAPI:
         if self._require_registered_device(device_id) is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
-        # Convert label to empty string if None (command expects optional)
-        label_arg = label if label is not None else ""
+        label_arg = label or None
 
-        ok = await self._dispatcher.show_status(device_id, state, label_arg if label_arg else None)
+        ok = await self._dispatcher.show_status(device_id, state, label_arg)
         return self._json_response({
             "ok": ok,
             "device_id": device_id,
@@ -265,8 +267,7 @@ class GatewayAPI:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
         until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-        until_str = until.strftime("%Y-%m-%dT%H:%M:%S") + until.strftime(".%f")[:-3] + "Z"
-        # Simple: datetime.now().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        until_str = self._format_utc_timestamp(until)
 
         ok = await self._dispatcher.mute_until(device_id, until_str)
 
