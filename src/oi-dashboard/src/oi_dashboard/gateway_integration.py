@@ -4,7 +4,7 @@ This module provides a DashboardIntegration class that connects a Dashboard
 instance to the gateway's EventBus for real-time event forwarding.
 
 Usage:
-    from oi_dashboard import Dashboard, DashboardIntegration
+    from oi_dashboard import DashboardIntegration, get_dashboard
     from datp.events import get_event_bus
 
     dashboard = get_dashboard()

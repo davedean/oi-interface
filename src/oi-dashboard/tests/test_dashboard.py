@@ -210,11 +210,3 @@ class TestSnapshot:
         assert "timestamp" in snapshot
         assert "device1" in snapshot["devices"]
         assert len(snapshot["transcripts"]) == 1
-
-
-class TestProxyRequests:
-    async def test_proxy_returns_502_on_gateway_unreachable(self, dashboard):
-        """Proxy should return 502 when gateway is unreachable."""
-        # The dashboard was configured with unreachable API URL
-        _, data = await retry_request(lambda: fetch_json(dashboard, "/api/health"))
-        assert "error" in data

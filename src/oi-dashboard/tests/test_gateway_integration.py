@@ -7,7 +7,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from oi_dashboard import DashboardIntegration
-from oi_dashboard.dashboard import Dashboard
 from oi_dashboard.gateway_integration import DashboardIntegration as IntegrationModuleExport
 
 
