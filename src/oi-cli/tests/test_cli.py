@@ -5,9 +5,7 @@ import json
 import sys
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 # Add cli source to path
 cli_src = Path(__file__).parent.parent
@@ -19,15 +17,6 @@ from oi_cli import main, APIClient, format_human_devices, format_human_status, f
 # ------------------------------------------------------------------
 # Mock HTTP client fixture
 # ------------------------------------------------------------------
-
-
-class MockResponse:
-    def __init__(self, data: dict, status: int = 200):
-        self._data = data
-        self.status = status
-
-    def read(self):
-        return json.dumps(self._data).encode()
 
 
 class MockClient(APIClient):
@@ -499,15 +488,9 @@ class TestErrorHandling:
             "GET:/api/devices": {"error": "Device not found"}
         })
         with patch.object(sys, "argv", ["oi", "--api-url", "http://test", "devices"]):
-            with patch.object(sys, "stdout", StringIO()) as out:
-                with patch.object(sys, "stderr", StringIO()) as err_out:
+            with patch.object(sys, "stdout", StringIO()):
+                with patch.object(sys, "stderr", StringIO()):
                     with patch("oi_cli.APIClient", return_value=client):
                         code = main()
         # Client returns the error dict; main prints it and exits
         assert code == 0 or code == 1  # depends on how we handle errors
-
-    def test_connection_error_masks_url(self):
-        """Ensure we don't leak URLs in error messages."""
-        # This is harder to test without a real network call
-        # Just verify the code path exists
-        pass
