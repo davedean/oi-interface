@@ -74,6 +74,16 @@ def _new_id(prefix: str = "msg") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def _trace_event_payload(event: TraceEvent) -> dict[str, Any]:
+    """Convert a trace event to the JSONL payload written to disk."""
+    return {
+        "ts": event.ts,
+        "direction": event.direction,
+        "kind": event.kind,
+        "data": event.data,
+    }
+
+
 # ------------------------------------------------------------------
 # OiSim
 # ------------------------------------------------------------------
@@ -198,40 +208,10 @@ class OiSim:
 
         self._ws = await websockets.connect(self.gateway)
         self._connected = True
+        await self._ws.send(json.dumps(self._build_hello_message()))
 
-        # Send hello with proper handshake spec structure
-        hello_id = _new_id("hello")
-        hello = {
-            "v": "datp",
-            "type": "hello",
-            "id": hello_id,
-            "device_id": self.device_id,
-            "ts": _now_iso(),
-            "payload": {
-                "device_type": self.device_type,
-                "protocol": "datp",
-                "firmware": f"oi-sim/{self.device_type}",
-                "capabilities": self.capabilities,
-                "state": {
-                    "mode": "READY",
-                    "battery_percent": 100,  # simulated
-                    "wifi_rssi": -50,        # simulated
-                },
-                "nonce": secrets.token_hex(8),
-            },
-        }
-        await self._ws.send(json.dumps(hello))
-
-        # Wait for hello_ack
         raw = await asyncio.wait_for(self._ws.recv(), timeout=5.0)
-        resp: dict[str, Any] = json.loads(raw)
-
-        if resp.get("type") != "hello_ack":
-            raise RuntimeError(f"Expected hello_ack, got {resp.get('type')!r}")
-
-        self._session_id = resp.get("payload", {}).get("session_id")
-
-        # Start background listener
+        self._session_id = self._parse_hello_ack(raw)
         self._listen_task = asyncio.create_task(self._listen_loop())
 
     async def disconnect(self) -> None:
@@ -349,14 +329,7 @@ class OiSim:
     async def _send(self, msg_type: str, payload: dict[str, Any]) -> None:
         """Send a DATP message of the given type."""
         assert self._ws is not None, "Not connected"
-        msg = {
-            "v": "datp",
-            "type": msg_type,
-            "id": _new_id(msg_type[:4]),
-            "device_id": self.device_id,
-            "ts": _now_iso(),
-            "payload": payload,
-        }
+        msg = self._build_message(msg_type, payload)
         await self._ws.send(json.dumps(msg))
         self._record_trace("send", msg_type, msg)
 
@@ -798,19 +771,63 @@ class OiSim:
         self._received_commands.clear()
         self._received_messages.clear()
 
+    def _build_hello_message(self) -> dict[str, Any]:
+        """Build the initial DATP hello handshake payload."""
+        return self._build_message(
+            "hello",
+            {
+                "device_type": self.device_type,
+                "protocol": "datp",
+                "firmware": f"oi-sim/{self.device_type}",
+                "capabilities": self.capabilities,
+                "state": {
+                    "mode": "READY",
+                    "battery_percent": 100,
+                    "wifi_rssi": -50,
+                },
+                "nonce": secrets.token_hex(8),
+            },
+            message_id=_new_id("hello"),
+        )
+
+    def _parse_hello_ack(self, raw: str) -> str | None:
+        """Parse the hello acknowledgement and return the session id."""
+        resp: dict[str, Any] = json.loads(raw)
+        if resp.get("type") != "hello_ack":
+            raise RuntimeError(f"Expected hello_ack, got {resp.get('type')!r}")
+        return resp.get("payload", {}).get("session_id")
+
+    def _build_message(
+        self,
+        msg_type: str,
+        payload: dict[str, Any],
+        *,
+        message_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Build a DATP envelope for an outbound message."""
+        return {
+            "v": "datp",
+            "type": msg_type,
+            "id": message_id or _new_id(msg_type[:4]),
+            "device_id": self.device_id,
+            "ts": _now_iso(),
+            "payload": payload,
+        }
+
     def _record_trace(self, direction: str, kind: str, data: dict[str, Any]) -> None:
         """Record a structured trace event and optionally append it to JSONL."""
         event = TraceEvent(ts=_now_iso(), direction=direction, kind=kind, data=data)
         self._trace.append(event)
-        if self.trace_path is not None:
-            self.trace_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.trace_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps({
-                    "ts": event.ts,
-                    "direction": event.direction,
-                    "kind": event.kind,
-                    "data": event.data,
-                }) + "\n")
+        self._write_trace_event(event)
+
+    def _write_trace_event(self, event: TraceEvent) -> None:
+        """Append a trace event to the optional JSONL trace file."""
+        if self.trace_path is None:
+            return
+
+        self.trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.trace_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(_trace_event_payload(event)) + "\n")
 
     async def simulate_audio_error(self, message: str = "Audio playback failed") -> None:
         """Simulate an audio-related error.
