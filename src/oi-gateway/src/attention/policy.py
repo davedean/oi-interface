@@ -210,7 +210,10 @@ class AttentionPolicy:
                 transition_to_use = (
                     AttentionTransition.INTERRUPTED if attention_interrupted else AttentionTransition.IMPLICIT
                 )
-                self._release_current_attention(transition=transition_to_use)
+                self._release_current_attention(
+                    transition=transition_to_use,
+                    process_queue=False,
+                )
 
         now = self._get_time()
 
@@ -301,6 +304,7 @@ class AttentionPolicy:
         self,
         reason: str = "",
         transition: AttentionTransition = AttentionTransition.EXPLICIT,
+        process_queue: bool = True,
     ) -> None:
         """Internal method to release current attention."""
         if self._current_attention is None:
@@ -334,7 +338,8 @@ class AttentionPolicy:
         )
 
         # Check for queued devices
-        self._process_attention_queue()
+        if process_queue:
+            self._process_attention_queue()
 
     def _queue_for_attention(self, device_id: str, priority: int) -> None:
         """Add device to attention queue based on priority."""

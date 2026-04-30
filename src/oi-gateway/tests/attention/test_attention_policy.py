@@ -164,6 +164,18 @@ class TestAttentionPolicy:
         assert state is not None
         assert state.priority == 0
 
+    def test_acquire_attention_interrupt_does_not_drain_queue(self):
+        """Higher-priority takeover should not consume queued devices."""
+        policy = AttentionPolicy(config=AttentionConfig(enable_priority=True))
+        policy.acquire_attention(device_id="stick-001", priority=5)
+        assert policy.acquire_attention(device_id="stick-002", priority=1) is False
+
+        result = policy.acquire_attention(device_id="stick-003", priority=10)
+
+        assert result is True
+        assert policy.current_attention == "stick-003"
+        assert policy._attention_queue == ["stick-002"]
+
     def test_release_attention(self):
         """Test releasing attention."""
         policy = AttentionPolicy()
