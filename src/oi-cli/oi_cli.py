@@ -311,25 +311,27 @@ def build_parser() -> argparse.ArgumentParser:
 # ------------------------------------------------------------------
 
 
-COMMAND_RUNNERS = {
-    "devices": lambda parsed, client: cmd_devices(client, parsed.human),
-    "status": lambda parsed, client: cmd_status(client, parsed.human),
-    "show-status": lambda parsed, client: cmd_show_status(
-        client,
-        parsed.device,
-        parsed.state,
-        parsed.label,
-        parsed.human,
-    ),
-    "mute": lambda parsed, client: cmd_mute(client, parsed.device, parsed.minutes, parsed.human),
-    "route": lambda parsed, client: cmd_route(client, parsed.device, parsed.text, parsed.human),
-    "audio-play": lambda parsed, client: cmd_audio_play(
-        client,
-        parsed.device,
-        parsed.response_id,
-        parsed.human,
-    ),
-}
+def run_command(parsed: argparse.Namespace, client: APIClient) -> None:
+    """Dispatch a parsed command to the matching handler."""
+    if parsed.command == "devices":
+        cmd_devices(client, parsed.human)
+        return
+    if parsed.command == "status":
+        cmd_status(client, parsed.human)
+        return
+    if parsed.command == "show-status":
+        cmd_show_status(client, parsed.device, parsed.state, parsed.label, parsed.human)
+        return
+    if parsed.command == "mute":
+        cmd_mute(client, parsed.device, parsed.minutes, parsed.human)
+        return
+    if parsed.command == "route":
+        cmd_route(client, parsed.device, parsed.text, parsed.human)
+        return
+    if parsed.command == "audio-play":
+        cmd_audio_play(client, parsed.device, parsed.response_id, parsed.human)
+        return
+    raise ValueError(f"Unknown command: {parsed.command}")
 
 
 def main(args: list[str] | None = None) -> int:
@@ -346,7 +348,7 @@ def main(args: list[str] | None = None) -> int:
     client = APIClient(parsed.api_url)
 
     try:
-        COMMAND_RUNNERS[parsed.command](parsed, client)
+        run_command(parsed, client)
     except SystemExit:
         raise  # Re-raise SystemExit from client methods
     except Exception as exc:
