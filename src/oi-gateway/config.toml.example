@@ -1,0 +1,19 @@
+# Canonical oi-gateway config
+# Copy to ~/.oi/config/oi-gateway/config.toml
+
+[env]
+# Backend profile: pi | hermes | openclaw
+OI_AGENT_BACKEND = "openclaw"
+
+# OpenClaw backend
+OI_OPENCLAW_URL = "ws://127.0.0.1:18789"
+
+# STT options: whisper | openai | stub
+OI_STT_BACKEND = "openai"
+OI_OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"
+
+# TTS options: piper | espeak-ng | openai | stub
+OI_TTS_BACKEND = "espeak-ng"
+OI_TTS_VOICE = "en"
+# OI_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+# OI_OPENAI_TTS_VOICE = "alloy"

@@ -103,6 +103,37 @@ source_env_file() {
     fi
 }
 
+source_toml_env() {
+    local file="$1"
+    if [[ -f "${file}" ]]; then
+        log_info "Loading TOML config: ${file}"
+        local py
+        py="$(python_cmd)"
+        # Export top-level KEY="value" pairs and [env] table entries.
+        while IFS= read -r line; do
+            eval "export ${line}"
+        done < <("${py}" - "$file" <<'PY'
+import sys, tomllib
+from pathlib import Path
+p=Path(sys.argv[1])
+obj=tomllib.loads(p.read_text())
+items={}
+for k,v in obj.items():
+    if isinstance(v,(str,int,float,bool)):
+        items[k]=v
+env=obj.get("env")
+if isinstance(env,dict):
+    for k,v in env.items():
+        if isinstance(v,(str,int,float,bool)):
+            items[k]=v
+for k,v in items.items():
+    sval=str(v).replace('"','\\"')
+    print(f'{k}="{sval}"')
+PY
+)
+    fi
+}
+
 source_legacy_backend_env() {
     local backend="$1"
 
@@ -117,6 +148,11 @@ prepare_backend_env() {
 
     export OI_HOME="${OI_HOME_DIR}"
     export OI_AGENT_BACKEND="${backend}"
+    source_toml_env "${OI_CONFIG_DIR}/config.toml"
+    source_toml_env "${OI_SECRETS_DIR}/secrets.toml"
+    source_toml_env "${OI_CONFIG_DIR}/${backend}.toml"
+    source_toml_env "${OI_SECRETS_DIR}/${backend}.toml"
+
     source_env_file "${OI_SECRETS_DIR}/${backend}.env.local"
     source_env_file "${OI_CONFIG_DIR}/${backend}.env.local"
 
