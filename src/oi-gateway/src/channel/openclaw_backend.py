@@ -48,75 +48,26 @@ class OpenClawBackend(AgentBackend):
         """Send a request and stream response chunks from OpenClaw."""
         async with self._session_factory() as session:
             async with session.ws_connect(self._url, heartbeat=30.0) as ws:
-                challenge = await ws.receive_json()
-                if challenge.get("type") != "event" or challenge.get("event") != "connect.challenge":
-                    raise AgentBackendError("OpenClaw gateway did not send connect.challenge")
-                nonce = ((challenge.get("payload") or {}).get("nonce") or "").strip()
-                if not nonce:
-                    raise AgentBackendError("OpenClaw gateway connect.challenge missing nonce")
-
-                connect_id = self._next_id("connect")
-                connect_request = await self._build_connect_request(connect_id, nonce)
-                self._log_connect_request(connect_request)
-                await ws.send_json(connect_request)
-                hello = await ws.receive_json()
-                self._assert_ok_response(hello, connect_id, "OpenClaw connect")
-                self._log_hello_ok(hello)
+                await self._perform_connect_handshake(ws)
 
                 request_id = self._next_id("agent")
                 session_key = self._map_session_key(request.session_key, request.source_device_id)
                 await ws.send_json(self._build_agent_request(request_id, request, session_key))
 
-                last_text = ""
+                streamed_text = ""
                 while True:
                     frame = await ws.receive_json()
-                    frame_type = frame.get("type")
-
-                    # Handle interleaved event frames (streaming text updates)
-                    if frame_type == "event":
-                        event_name = frame.get("event")
-                        payload = frame.get("payload") or {}
-                        # Check for text delta in event payload
-                        text = self._extract_text_from_openclaw_payload(payload)
-                        if text:
-                            last_text += text
-                            logger.debug("OpenClaw streaming text: %s", text[:50])
-                            yield AgentStreamChunk(
-                                text_delta=text,
-                                is_final=False,
-                                metadata={"event": event_name},
-                            )
+                    event_chunk = self._build_event_chunk(frame)
+                    if event_chunk is not None:
+                        streamed_text += event_chunk.text_delta
+                        yield event_chunk
                         continue
 
-                    self._assert_matching_response(frame, request_id)
-                    payload = frame.get("payload")
-                    if not isinstance(payload, dict):
-                        raise AgentBackendError("OpenClaw backend returned malformed payload")
-                    status = payload.get("status")
-                    if status == "accepted":
+                    is_complete, final_chunk = self._handle_response_frame(frame, request_id, streamed_text)
+                    if not is_complete:
                         continue
-                    response_text = self._extract_response_text(payload)
-                    if not response_text:
-                        raise AgentBackendError("OpenClaw backend returned no assistant text")
-                    
-                    # Yield any remaining text as final
-                    if not last_text and response_text:
-                        yield AgentStreamChunk(
-                            text_delta=response_text,
-                            is_final=True,
-                            metadata=self._extract_metadata(payload),
-                        )
-                    elif response_text != last_text:
-                        # Send remaining delta
-                        remaining = response_text[len(last_text):] if response_text.startswith(last_text) else response_text
-                        if remaining:
-                            yield AgentStreamChunk(
-                                text_delta=remaining,
-                                is_final=True,
-                                metadata=self._extract_metadata(payload),
-                            )
-                    elif not last_text and not response_text:
-                        raise AgentBackendError("OpenClaw backend returned no assistant text")
+                    if final_chunk is not None:
+                        yield final_chunk
                     break
 
     async def send_request(self, request: AgentRequest) -> AgentResponse:
@@ -242,13 +193,13 @@ class OpenClawBackend(AgentBackend):
         params = request.get("params")
         if not isinstance(params, dict):
             return
-        client = params.get("client")
+        client = params.get("client") if isinstance(params.get("client"), dict) else {}
         auth = params.get("auth")
         device = params.get("device")
         logger.info(
             "OpenClaw connect request client=%s mode=%s role=%s scopes=%s auth_token=%s device=%s",
-            (client or {}).get("id") if isinstance(client, dict) else None,
-            (client or {}).get("mode") if isinstance(client, dict) else None,
+            client.get("id"),
+            client.get("mode"),
             params.get("role"),
             params.get("scopes"),
             bool(auth.get("token")) if isinstance(auth, dict) else False,
@@ -476,18 +427,82 @@ process.stdout.write(Buffer.from(sig).toString("base64").replace(/\+/g, "-").rep
             suffix = session_key.removeprefix("oi:device:")
         return f"agent:main:oi:device:{suffix}"
 
-    def _extract_text_from_openclaw_payload(self, payload: dict) -> str:
+    async def _perform_connect_handshake(self, ws: Any) -> None:
+        challenge = await ws.receive_json()
+        nonce = self._extract_connect_nonce(challenge)
+
+        connect_id = self._next_id("connect")
+        connect_request = await self._build_connect_request(connect_id, nonce)
+        self._log_connect_request(connect_request)
+        await ws.send_json(connect_request)
+
+        hello = await ws.receive_json()
+        self._assert_ok_response(hello, connect_id, "OpenClaw connect")
+        self._log_hello_ok(hello)
+
+    def _extract_connect_nonce(self, challenge: dict[str, Any]) -> str:
+        if challenge.get("type") != "event" or challenge.get("event") != "connect.challenge":
+            raise AgentBackendError("OpenClaw gateway did not send connect.challenge")
+        payload = challenge.get("payload") if isinstance(challenge.get("payload"), dict) else {}
+        nonce = str(payload.get("nonce") or "").strip()
+        if not nonce:
+            raise AgentBackendError("OpenClaw gateway connect.challenge missing nonce")
+        return nonce
+
+    def _build_event_chunk(self, frame: dict[str, Any]) -> AgentStreamChunk | None:
+        if frame.get("type") != "event":
+            return None
+        event_name = frame.get("event")
+        payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
+        text = self._extract_text_from_openclaw_payload(payload)
+        if not text:
+            return None
+        logger.debug("OpenClaw streaming text: %s", text[:50])
+        return AgentStreamChunk(text_delta=text, is_final=False, metadata={"event": event_name})
+
+    def _handle_response_frame(
+        self,
+        frame: dict[str, Any],
+        request_id: str,
+        streamed_text: str,
+    ) -> tuple[bool, AgentStreamChunk | None]:
+        self._assert_matching_response(frame, request_id)
+        payload = frame.get("payload")
+        if not isinstance(payload, dict):
+            raise AgentBackendError("OpenClaw backend returned malformed payload")
+        if payload.get("status") == "accepted":
+            return False, None
+
+        response_text = self._extract_response_text(payload)
+        if not response_text:
+            raise AgentBackendError("OpenClaw backend returned no assistant text")
+
+        remaining_text = self._remaining_response_text(streamed_text, response_text)
+        if not remaining_text:
+            return True, None
+        return True, AgentStreamChunk(
+            text_delta=remaining_text,
+            is_final=True,
+            metadata=self._extract_metadata(payload),
+        )
+
+    def _remaining_response_text(self, streamed_text: str, response_text: str) -> str:
+        if not streamed_text:
+            return response_text
+        if response_text == streamed_text:
+            return ""
+        if response_text.startswith(streamed_text):
+            return response_text[len(streamed_text):]
+        return response_text
+
+    def _extract_text_from_openclaw_payload(self, payload: dict[str, Any]) -> str:
         """Extract text from OpenClaw event payload."""
         if not isinstance(payload, dict):
             return ""
-        # Check for common text fields in OpenClaw events
-        for key in ("text", "content", "message", "delta"):
-            val = payload.get(key)
-            if isinstance(val, str) and val.strip():
-                return val
-        # Check nested text
-        if isinstance(payload.get("data"), str) and payload["data"].strip():
-            return str(payload["data"])
+        for key in ("text", "content", "message", "delta", "data"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
         return ""
 
     def _extract_response_text(self, payload: dict[str, Any]) -> str | None:
