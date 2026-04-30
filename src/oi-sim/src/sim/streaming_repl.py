@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from sim.repl import OiSimREPL
+from sim.repl import OiSimREPL, run_repl_app
 
 HELP_TEXT = OiSimREPL.help_text.replace(
     "text <msg>  - Send text prompt to agent",
@@ -35,11 +35,9 @@ class StreamingOiSimREPL(OiSimREPL):
         super().__init__(gateway=gateway, device_id=device_id)
         self.current_response_text = ""
 
-    async def _receive_loop(self):
-        """Background task to receive and display messages from gateway."""
-        while self.running and self.sim:
-            await asyncio.sleep(0.1)
-            self._print_pending_commands(self._print_streaming_command)
+    def _live_command_printer(self, command: dict[str, Any]) -> None:
+        """Print a command received during the live streaming REPL session."""
+        self._print_streaming_command(command)
 
     def _print_streaming_command(self, command: dict[str, Any]) -> None:
         """Print a received command, handling streamed text specially."""
@@ -80,6 +78,9 @@ class StreamingOiSimREPL(OiSimREPL):
         """Format a single event-history row with streamed text previews."""
         msg_type = msg.get("type", "?")
         payload = msg.get("payload", {})
+        if msg_type == "command" and payload.get("op") == "display.show_response_delta":
+            text = payload.get("args", {}).get("text_delta", "")[:50]
+            return f"  {index}. 📥 display.show_response_delta: '{text}'..."
         if msg_type == "event" and payload.get("event") == "agent_response_delta":
             text = payload.get("text_delta", "")[:50]
             return f"  {index}. 📤 agent_response_delta: '{text}'..."
@@ -94,15 +95,10 @@ class StreamingOiSimREPL(OiSimREPL):
 
 async def main():
     """Main entry point."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Oi-Sim Streaming REPL - Interactive virtual device")
-    parser.add_argument("--gateway", default="ws://localhost:8787/datp", help="Gateway WebSocket URL")
-    parser.add_argument("--device-id", default="oi-sim-repl-001", help="Device ID")
-    args = parser.parse_args()
-
-    repl = StreamingOiSimREPL(gateway=args.gateway, device_id=args.device_id)
-    await repl.start()
+    await run_repl_app(
+        StreamingOiSimREPL,
+        "Oi-Sim Streaming REPL - Interactive virtual device",
+    )
 
 
 if __name__ == "__main__":

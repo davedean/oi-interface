@@ -94,16 +94,16 @@ async def test_cmd_events_reports_empty_and_mixed_history(repl, fake_sim, capsys
 
     fake_sim.received_messages = [
         {"type": "command", "payload": {"op": "display.show_card"}},
-        {"type": "event", "payload": {"event": "agent_response_delta", "text_delta": "Hello world"}},
+        {"type": "command", "payload": {"op": "display.show_response_delta", "args": {"text_delta": "Hello world"}}},
         {"type": "event", "payload": {"event": "button.pressed"}},
     ]
     await repl._cmd_events([])
     out = capsys.readouterr().out
 
     assert "No events yet" in empty_out
-    assert "Last 3 messages:" in out
+    assert "Last 3 of 3 messages:" in out
     assert "📥 display.show_card" in out
-    assert "📤 agent_response_delta: 'Hello world'..." in out
+    assert "📥 display.show_response_delta: 'Hello world'..." in out
     assert "📤 button.pressed" in out
 
 

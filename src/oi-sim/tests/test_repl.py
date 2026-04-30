@@ -228,7 +228,7 @@ async def test_cmd_events_empty_and_mixed_messages(repl, fake_sim, capsys):
     out = capsys.readouterr().out
 
     assert "No events yet" in empty_out
-    assert "Last 3 messages:" in out
+    assert "Last 3 of 3 messages:" in out
     assert "📥 display.show_card" in out
     assert "📤 button.pressed" in out
     assert "ack" in out
@@ -311,7 +311,7 @@ async def test_repl_loop_handles_eof_stops_running(monkeypatch):
         async def run_in_executor(self, *_args, **_kwargs):
             raise EOFError
 
-    monkeypatch.setattr("sim.repl.asyncio.get_event_loop", lambda: FakeLoop())
+    monkeypatch.setattr("sim.repl.asyncio.get_running_loop", lambda: FakeLoop())
 
     await repl._repl_loop()
 
@@ -331,7 +331,7 @@ async def test_repl_loop_handles_keyboard_interrupt_then_quit(monkeypatch, capsy
                 raise result
             return result
 
-    monkeypatch.setattr("sim.repl.asyncio.get_event_loop", lambda: FakeLoop())
+    monkeypatch.setattr("sim.repl.asyncio.get_running_loop", lambda: FakeLoop())
 
     await repl._repl_loop()
     out = capsys.readouterr().out

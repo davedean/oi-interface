@@ -6,7 +6,7 @@ import json
 import pytest
 
 import sim
-from sim.sim import OiSim
+from sim.sim import DEFAULT_CAPABILITIES, OiSim
 from sim.state import InvalidTransition, State, StateMachine
 
 
@@ -362,6 +362,15 @@ class TestOiSimUnitCoverage:
         assert device.display_state == "thinking"
         assert device.display_label == "Working"
         assert device.muted_until == "later"
+
+    def test_default_capabilities_are_deep_copied_per_instance(self):
+        first = OiSim()
+        second = OiSim()
+
+        first.capabilities["input"].append("new-input")
+
+        assert "new-input" not in second.capabilities["input"]
+        assert "new-input" not in DEFAULT_CAPABILITIES["input"]
 
     def test_package_exports_and_lazy_attributes(self):
         assert sim.__all__ == [

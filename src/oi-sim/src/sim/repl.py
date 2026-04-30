@@ -92,7 +92,7 @@ class OiSimREPL:
         """Main REPL loop."""
         while self.running:
             try:
-                line = await asyncio.get_event_loop().run_in_executor(
+                line = await asyncio.get_running_loop().run_in_executor(
                     None, lambda: input("> ").strip()
                 )
                 if line:
@@ -152,7 +152,11 @@ class OiSimREPL:
         """Background task to receive and display messages from gateway."""
         while self.running and self.sim:
             await asyncio.sleep(0.1)
-            self._print_pending_commands(self._print_command)
+            self._print_pending_commands(self._live_command_printer)
+
+    def _live_command_printer(self, command: dict[str, Any]) -> None:
+        """Print a command received during the live REPL session."""
+        self._print_command(command)
 
     async def _stop_receive_task(self) -> None:
         """Cancel and await the background receive task if it is running."""
@@ -201,8 +205,9 @@ class OiSimREPL:
             print("No events yet")
             return
 
-        print(f"Last {len(messages)} messages:")
-        for i, msg in enumerate(messages[-self.event_history_limit :], 1):
+        recent_messages = messages[-self.event_history_limit :]
+        print(f"Last {len(recent_messages)} of {len(messages)} messages:")
+        for i, msg in enumerate(recent_messages, 1):
             print(self._format_message_history_entry(i, msg))
 
     def _format_message_history_entry(self, index: int, msg: dict[str, Any]) -> str:
@@ -362,17 +367,22 @@ class OiSimREPL:
         self.running = False
 
 
-async def main():
-    """Main entry point."""
+async def run_repl_app(repl_cls: type[OiSimREPL], description: str) -> None:
+    """Parse standard REPL CLI args and start the requested REPL class."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Oi-Sim REPL - Interactive virtual device")
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--gateway", default="ws://localhost:8787/datp", help="Gateway WebSocket URL")
     parser.add_argument("--device-id", default="oi-sim-repl-001", help="Device ID")
     args = parser.parse_args()
 
-    repl = OiSimREPL(gateway=args.gateway, device_id=args.device_id)
+    repl = repl_cls(gateway=args.gateway, device_id=args.device_id)
     await repl.start()
+
+
+async def main():
+    """Main entry point."""
+    await run_repl_app(OiSimREPL, "Oi-Sim REPL - Interactive virtual device")
 
 
 if __name__ == "__main__":

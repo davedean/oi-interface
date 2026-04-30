@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import secrets
@@ -121,7 +122,7 @@ class OiSim(OiSimDeviceAPI):
         self.gateway = gateway
         self.device_id = device_id
         self.device_type = device_type
-        self.capabilities = capabilities or dict(DEFAULT_CAPABILITIES)
+        self.capabilities = capabilities or copy.deepcopy(DEFAULT_CAPABILITIES)
         self.strict = strict
         self.trace_path = Path(trace_path) if trace_path is not None else None
         self.reconnect_backoff_seconds = reconnect_backoff_seconds
@@ -150,17 +151,17 @@ class OiSim(OiSimDeviceAPI):
     @property
     def display_state(self) -> str | None:
         """Last display state from display.show_status command, or None."""
-        return self._state_machine._display_state
+        return self._state_machine.display_state
 
     @property
     def display_label(self) -> str | None:
         """Last display label from display.show_status command, or None."""
-        return self._state_machine._display_label
+        return self._state_machine.display_label
 
     @property
     def muted_until(self) -> str | None:
         """Timestamp from device.mute_until command, or None."""
-        return self._state_machine._muted_until
+        return self._state_machine.muted_until
 
     @property
     def volume(self) -> int:

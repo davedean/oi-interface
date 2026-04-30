@@ -217,6 +217,21 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     @property
+    def display_state(self) -> str | None:
+        """Last display state set by display.show_status."""
+        return self._display_state
+
+    @property
+    def display_label(self) -> str | None:
+        """Last display label set by display.show_status."""
+        return self._display_label
+
+    @property
+    def muted_until(self) -> str | None:
+        """Mute-until timestamp from device.mute_until."""
+        return self._muted_until
+
+    @property
     def volume(self) -> int:
         """Current volume level (0-100)."""
         return self._volume

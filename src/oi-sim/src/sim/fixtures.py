@@ -17,9 +17,10 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
 
-from sim.sim import OiSim
+if TYPE_CHECKING:
+    from sim.sim import OiSim
 
 # ------------------------------------------------------------------
 # Loading
@@ -31,7 +32,7 @@ def _iter_fixture_entries(path: str) -> Iterator[dict[str, Any]]:
     if not fixture_path.exists():
         raise FileNotFoundError(f"Fixture not found: {path!r}")
 
-    with fixture_path.open() as handle:
+    with fixture_path.open(encoding="utf-8") as handle:
         for lineno, raw in enumerate(handle, 1):
             line = raw.strip()
             if not line:

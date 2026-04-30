@@ -31,7 +31,8 @@ Typical first-time local setup:
 - REPL entrypoint is `src/sim/repl.py`.
 - Keep simulator behavior aligned with gateway protocol/state expectations.
 - When state-machine semantics change, update both `src/sim/state.py` and the focused
-  simulator/state tests in `tests/test_sim.py` and `tests/test_sim_unit.py` together.
+  simulator/state tests in `tests/test_sim_state_machine.py` and `tests/test_sim_unit.py`
+  together.
 
 ## Testing (rough)
 
