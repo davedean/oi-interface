@@ -979,7 +979,7 @@ class DeviceRenderer:
         state_cfg = self.pack.states[state]
 
         # Determine the label (custom overrides pack default)
-        label = custom_label if custom_label else state_cfg.label
+        label = custom_label if custom_label is not None else state_cfg.label
 
         # Validate label length
         max_len = self.MAX_LABEL_LENGTHS.get(self.pack.target, 16)

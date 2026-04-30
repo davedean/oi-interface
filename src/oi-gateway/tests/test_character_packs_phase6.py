@@ -185,8 +185,15 @@ class TestDeviceRenderer:
         """Renderer accepts custom label override."""
         renderer = DeviceRenderer(sample_pack)
         instruction = renderer.render("idle", custom_label="Custom Label")
-        
+
         assert instruction.label == "Custom Label"
+
+    def test_render_empty_custom_label(self, sample_pack):
+        """Renderer preserves an explicit empty label override."""
+        renderer = DeviceRenderer(sample_pack)
+        instruction = renderer.render("idle", custom_label="")
+
+        assert instruction.label == ""
 
     def test_render_label_truncation(self, sample_pack):
         """Renderer truncates long labels."""
