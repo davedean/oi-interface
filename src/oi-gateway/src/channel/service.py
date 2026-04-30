@@ -6,7 +6,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 
-from .backend import AgentBackend, AgentBackendError, AgentResponse, AgentStreamChunk
+from .backend import AgentBackend, AgentBackendError, AgentRequest, AgentResponse, AgentStreamChunk
 from .request_builder import (
     build_agent_request_from_text_prompt,
     build_agent_request_from_transcript,
@@ -46,21 +46,23 @@ class ChannelService:
 
     def _on_event(self, event_type: str, device_id: str, payload: dict[str, Any]) -> None:
         if event_type == "event" and payload.get("event") == "text.prompt":
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self._handle_text_prompt(device_id, payload))
-            else:
-                logger.warning("Event loop not running; cannot schedule text prompt handling")
+            self._schedule_handler(
+                self._handle_text_prompt,
+                device_id,
+                payload,
+                "Event loop not running; cannot schedule text prompt handling",
+            )
             return
 
         if event_type != "transcript":
             return
 
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(self._handle_transcript(device_id, payload))
-        else:
-            logger.warning("Event loop not running; cannot schedule channel handling")
+        self._schedule_handler(
+            self._handle_transcript,
+            device_id,
+            payload,
+            "Event loop not running; cannot schedule channel handling",
+        )
 
     async def _handle_transcript(self, device_id: str, payload: dict[str, Any]) -> None:
         stream_id = payload.get("stream_id")
@@ -188,7 +190,6 @@ class ChannelService:
     async def _handle_streaming_request(self, request: AgentRequest, streaming_method) -> AgentResponse:
         """Handle a streaming request, emitting delta events and returning final response."""
         last_text = ""
-        last_final = False
         chunk_count = 0
         logger.info("Starting streaming request for device %s", request.source_device_id)
         last_progress_text = None
@@ -196,57 +197,37 @@ class ChannelService:
             chunk_count += 1
             if not isinstance(chunk, AgentStreamChunk):
                 continue
+
             progress_text = chunk.metadata.get("progress_text") if chunk.metadata else None
             if progress_text and progress_text != last_progress_text:
                 last_progress_text = progress_text
-                self._event_bus.emit(
-                    "agent_progress",
-                    request.source_device_id,
-                    {
-                        "stream_id": request.stream_id,
-                        "text": progress_text,
-                        "kind": "status",
-                        "device_context": request.device_context,
-                        "reply_constraints": request.reply_constraints,
-                        "backend_name": getattr(self._pi_backend, "name", "unknown"),
-                        "session_key": request.session_key,
-                        "correlation_id": request.correlation_id,
-                    },
-                )
+                self._emit_stream_progress(request, progress_text)
 
             if chunk.text_delta or chunk.is_final:
                 if chunk.text_delta:
                     last_text = chunk.text_delta if chunk.is_final else last_text + chunk.text_delta
-                last_final = chunk.is_final
-                logger.debug("Emitting delta: device=%s seq=%d final=%s text=%r", 
-                            request.source_device_id, chunk_count, chunk.is_final, 
-                            chunk.text_delta[:50] if chunk.text_delta else "")
-                # Emit delta for real-time display on devices
-                self._event_bus.emit(
-                    "agent_response_stream",
+                logger.debug(
+                    "Emitting delta: device=%s seq=%d final=%s text=%r",
                     request.source_device_id,
-                    {
-                        "stream_id": request.stream_id,
-                        "text_delta": chunk.text_delta,
-                        "is_final": chunk.is_final,
-                        "device_context": request.device_context,
-                        "reply_constraints": request.reply_constraints,
-                        "backend_name": getattr(self._pi_backend, "name", "unknown"),
-                        "session_key": request.session_key,
-                        "correlation_id": request.correlation_id,
-                    },
+                    chunk_count,
+                    chunk.is_final,
+                    chunk.text_delta[:50] if chunk.text_delta else "",
                 )
+                self._emit_stream_delta(request, chunk)
 
-        logger.info("Streaming request completed: device=%s chunks=%d final_len=%d",
-                    request.source_device_id, chunk_count, len(last_text))
-        
-        # Return final response
+        logger.info(
+            "Streaming request completed: device=%s chunks=%d final_len=%d",
+            request.source_device_id,
+            chunk_count,
+            len(last_text),
+        )
+
         return AgentResponse(
             response_text=last_text,
-            backend_name=getattr(self._pi_backend, "name", "unknown"),
+            backend_name=self._backend_name,
             session_key=request.session_key,
             correlation_id=request.correlation_id,
-            streaming_used=True,  # Mark that streaming was used
+            streaming_used=True,
         )
 
     def _build_prompt_message(self, transcript: str, device_context: dict[str, Any]) -> str:
@@ -266,7 +247,47 @@ class ChannelService:
         )
         return render_text_prompt(request)
 
-    async def _send_backend_request(self, request) -> AgentResponse:
+    def _schedule_handler(self, handler, device_id: str, payload: dict[str, Any], warning_message: str) -> None:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(handler(device_id, payload))
+            return
+
+        logger.warning(warning_message)
+
+    def _stream_payload_base(self, request: AgentRequest) -> dict[str, Any]:
+        return {
+            "stream_id": request.stream_id,
+            "device_context": request.device_context,
+            "reply_constraints": request.reply_constraints,
+            "backend_name": self._backend_name,
+            "session_key": request.session_key,
+            "correlation_id": request.correlation_id,
+        }
+
+    def _emit_stream_progress(self, request: AgentRequest, progress_text: str) -> None:
+        self._event_bus.emit(
+            "agent_progress",
+            request.source_device_id,
+            {
+                **self._stream_payload_base(request),
+                "text": progress_text,
+                "kind": "status",
+            },
+        )
+
+    def _emit_stream_delta(self, request: AgentRequest, chunk: AgentStreamChunk) -> None:
+        self._event_bus.emit(
+            "agent_response_stream",
+            request.source_device_id,
+            {
+                **self._stream_payload_base(request),
+                "text_delta": chunk.text_delta,
+                "is_final": chunk.is_final,
+            },
+        )
+
+    async def _send_backend_request(self, request: AgentRequest) -> AgentResponse:
         """Send request to backend, using streaming if available."""
         # First try streaming if available, otherwise fall back to non-streaming
         streaming_method = getattr(self._pi_backend, "send_request_streaming", None)
@@ -300,6 +321,7 @@ class ChannelService:
             )
 
         raise AgentBackendError("backend does not implement send_request or send_prompt")
+
     def _build_device_context(self, source_device_id: str) -> dict[str, Any]:
         online_devices = self._registry.get_online_devices()
         foreground_device = self._registry.get_foreground_device()
@@ -315,6 +337,13 @@ class ChannelService:
             "online": [d.device_id for d in online_devices],
             "capabilities": capabilities,
         }
+
+    @property
+    def _backend_name(self) -> str:
+        backend_name = getattr(self._pi_backend, "name", "unknown")
+        if callable(backend_name):
+            backend_name = backend_name()
+        return str(backend_name)
 
     @property
     def _backend_mode(self) -> str:
