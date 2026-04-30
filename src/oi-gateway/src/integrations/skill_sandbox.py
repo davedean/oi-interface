@@ -662,41 +662,44 @@ class SkillSandbox:
         """Validate skill code for safety.
 
         Raises SkillValidationError if code contains unsafe patterns.
-        
+
         This includes checking for dangerous imports and operations that
         could affect firmware (button rebinding, firmware flashing, etc.)
         """
-        # Check for dangerous imports
         forbidden_imports = ["os", "sys", "subprocess", "socket", "requests", "http"]
         for imp in forbidden_imports:
             if f"import {imp}" in code or f"from {imp} " in code:
                 raise SkillValidationError(f"Forbidden import: {imp}")
 
-        # Check for dangerous functions
-        forbidden = ["eval(", "exec(", "open("]
-        for pattern in forbidden:
+        forbidden_pattern = self._find_forbidden_pattern(code, ["eval(", "exec(", "open("])
+        if forbidden_pattern is not None:
+            raise SkillValidationError(f"Forbidden pattern: {forbidden_pattern}")
+
+        firmware_pattern = self._find_forbidden_operation(code)
+        if firmware_pattern is not None:
+            raise SkillValidationError(
+                f"Forbidden operation that could affect firmware: {firmware_pattern}"
+            )
+
+    def _find_forbidden_pattern(self, code: str, patterns: list[str]) -> str | None:
+        for pattern in patterns:
             if pattern in code:
-                raise SkillValidationError(f"Forbidden pattern: {pattern}")
-        
-        # Check for firmware-affecting patterns
-        code_lower = code.lower()
-        for pattern in self.FORBIDDEN_PATTERNS:
-            if pattern in code_lower:
-                raise SkillValidationError(
-                    f"Forbidden operation that could affect firmware: {pattern}"
-                )
+                return pattern
+        return None
+
+    def _find_forbidden_operation(self, code: str) -> str | None:
+        return self._find_forbidden_pattern(code.lower(), self.FORBIDDEN_PATTERNS)
 
     def _check_operation_allowed(self, code: str) -> bool:
         """Check if code contains any forbidden operations.
-        
+
         This is the firmware protection layer - even after validation,
         we check at execution time.
         """
-        code_lower = code.lower()
-        for pattern in self.FORBIDDEN_PATTERNS:
-            if pattern in code_lower:
-                logger.warning("Blocked forbidden operation in code: %s", pattern)
-                return False
+        forbidden_pattern = self._find_forbidden_operation(code)
+        if forbidden_pattern is not None:
+            logger.warning("Blocked forbidden operation in code: %s", forbidden_pattern)
+            return False
         return True
 
     @property
