@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 from .backend import AgentBackend, AgentBackendError, AgentRequest, AgentResponse, AgentStreamChunk
 from .request_builder import (
