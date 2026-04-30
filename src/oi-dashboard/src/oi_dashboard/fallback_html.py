@@ -26,7 +26,6 @@ INLINE_DASHBOARD_HTML = """<!DOCTYPE html>
         .response-text { color: #00d4ff; font-size: 0.9em; margin-top: 4px; }
         .empty { color: #666; font-style: italic; }
         .full-width { grid-column: 1 / -1; }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
     </style>
 </head>
