@@ -87,6 +87,10 @@ class TestToolBroker:
         assert not tool_broker.check_permission("flash_firmware", RiskLevel.ELEVATED)
         assert not tool_broker.check_permission("bypass_mute", RiskLevel.ELEVATED)
 
+    def test_check_permission_unknown_tool_denied(self, tool_broker):
+        """Unknown tools should fail closed."""
+        assert not tool_broker.check_permission("totally_new_tool", RiskLevel.ELEVATED)
+
 
 class TestSkillExecutor:
     """Tests for the SkillExecutor class (subprocess execution)."""
@@ -222,6 +226,17 @@ class TestSkillSandboxFirmwareProtection:
 
         with pytest.raises(SkillValidationError, match="Forbidden pattern"):
             sandbox.register_skill(skill)
+
+    def test_harmless_string_literal_is_allowed(self, sandbox):
+        """Mentioning a forbidden token in a plain string should not be blocked."""
+        skill = Skill(
+            name="string_literal_skill",
+            description="Returns a harmless label",
+            code='result = "button_map"',
+        )
+
+        sandbox.register_skill(skill)
+        assert sandbox.get_skill("string_literal_skill") is skill
 
 
 class TestSkillSandboxSubprocess:

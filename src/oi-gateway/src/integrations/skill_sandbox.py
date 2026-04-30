@@ -140,9 +140,8 @@ class ToolBroker:
         
         perm = self._permissions.get(tool_name)
         if not perm:
-            # Unknown tool - allow but log warning
             logger.warning("Unknown tool requested: %s", tool_name)
-            return True
+            return False
         
         # Check if tool is restricted
         if perm.risk_level == RiskLevel.RESTRICTED:
@@ -210,6 +209,7 @@ class SkillExecutor:
         self,
         skill_code: str,
         parameters: dict[str, Any],
+        allowed_imports: list[str] | None = None,
     ) -> SkillResult:
         """Execute skill code in a subprocess.
         
@@ -229,18 +229,18 @@ class SkillExecutor:
             None,
             self._execute_sync,
             skill_code,
-            parameters
+            parameters,
+            allowed_imports,
         )
 
     def _execute_sync(
         self,
         skill_code: str,
         parameters: dict[str, Any],
+        allowed_imports: list[str] | None = None,
     ) -> SkillResult:
         """Synchronous execution in subprocess."""
-        # Write skill code to a temp file
-        # Wrap code to capture result as JSON
-        wrapped_code = self._wrap_skill_code(skill_code)
+        wrapped_code = self._wrap_skill_code(skill_code, allowed_imports)
         
         try:
             with tempfile.NamedTemporaryFile(
@@ -303,26 +303,79 @@ class SkillExecutor:
                 error=f"Failed to setup execution: {e}",
             )
 
-    def _wrap_skill_code(self, code: str) -> str:
+    def _wrap_skill_code(self, code: str, allowed_imports: list[str] | None) -> str:
         """Wrap skill code to execute and return result as JSON."""
-        # Indent the skill code
-        indented_code = "\n".join(f"    {line}" for line in code.split("\n"))
-        
         return f'''#!/usr/bin/env python3
 """Skill execution wrapper - runs skill as subprocess."""
+import builtins
+import datetime
 import json
+import math
+import random
+import re
 import sys
+import time
+import typing
 
-def execute():
-{indented_code}
-    return locals().get('result')
+_ALLOWED_IMPORTS = {sorted(set(allowed_imports)) if allowed_imports is not None else None!r}
+_SAFE_BUILTINS = {{
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "Exception": Exception,
+    "float": float,
+    "int": int,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "round": round,
+    "set": set,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "zip": zip,
+}}
+
+
+def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    module_name = name.split(".", 1)[0]
+    if _ALLOWED_IMPORTS is not None and module_name not in _ALLOWED_IMPORTS:
+        raise ImportError(f"Forbidden import: {{module_name}}")
+    return builtins.__import__(name, globals, locals, fromlist, level)
+
+
+_SAFE_BUILTINS["__import__"] = _safe_import
+_USER_CODE = {code!r}
+
+
+def execute(parameters):
+    scope = {{
+        "__builtins__": _SAFE_BUILTINS,
+        "parameters": parameters,
+        "json": json,
+        "math": math,
+        "random": random,
+        "re": re,
+        "datetime": datetime,
+        "time": time,
+        "typing": typing,
+    }}
+    locals_scope = {{}}
+    exec(_USER_CODE, scope, locals_scope)
+    return locals_scope.get("result", scope.get("result"))
+
 
 if __name__ == "__main__":
     try:
-        # Read parameters from stdin once
         stdin_data = sys.stdin.read()
         parameters = json.loads(stdin_data) if stdin_data else {{}}
-        result = execute()
+        result = execute(parameters)
         print(json.dumps({{"success": True, "result": result}}))
     except Exception as e:
         print(json.dumps({{"success": False, "error": str(e)}}))
@@ -455,11 +508,12 @@ class SkillSandbox:
         self._max_execution_time = max_execution_time
         self._max_memory_mb = max_memory_mb
         self._allowed_imports = allowed_imports or [
+            "datetime",
             "json",
             "math",
             "random",
             "re",
-            "datetime",
+            "time",
             "typing",
         ]
 
@@ -581,6 +635,7 @@ class SkillSandbox:
             result = await self._executor.execute(
                 skill.code,
                 parameters,
+                allowed_imports=self._allowed_imports,
             )
 
             execution_time = asyncio.get_running_loop().time() - start_time
@@ -719,8 +774,10 @@ class SkillSandbox:
             candidates.append(node.id)
         elif isinstance(node, ast.Attribute):
             candidates.append(node.attr)
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            candidates.append(node.value)
+        elif isinstance(node, ast.Call):
+            for arg in (*node.args, *(keyword.value for keyword in node.keywords)):
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    candidates.append(arg.value)
         return candidates
 
     def _check_operation_allowed(self, code: str) -> bool:
