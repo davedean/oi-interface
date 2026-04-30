@@ -14,6 +14,7 @@ cli_src = Path(__file__).parent.parent
 sys.path.insert(0, str(cli_src))
 
 import oi_cli
+from api_client import GatewayConnectionError, GatewayRequestError
 from oi_cli import APIClient, build_parser, format_human_devices, format_human_status, main
 
 
@@ -50,28 +51,21 @@ def test_apiclient_get_uses_base_url_without_trailing_slash() -> None:
     urlopen.assert_called_once_with("http://example.test/api/health", timeout=5)
 
 
-def test_apiclient_get_exits_on_http_error_with_json_body() -> None:
+def test_apiclient_get_raises_request_error_on_http_error_with_json_body() -> None:
     client = APIClient("http://example.test")
     error = FakeHTTPError(body=b'{"error": "not allowed"}', code=403, reason="forbidden")
 
-    with patch.object(oi_cli.logger, "error") as log_error:
-        with patch("urllib.request.urlopen", side_effect=error):
-            with pytest.raises(SystemExit) as exc:
-                client.get("/api/health")
-
-    assert exc.value.code == 1
-    log_error.assert_called_once_with("API error (%d): %s", 403, "not allowed")
+    with patch("urllib.request.urlopen", side_effect=error):
+        with pytest.raises(GatewayRequestError, match=r"API error \(403\): not allowed"):
+            client.get("/api/health")
 
 
-
-def test_apiclient_get_exits_on_urlerror() -> None:
+def test_apiclient_get_raises_connection_error_on_urlerror() -> None:
     client = APIClient("http://example.test")
 
     with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("down")):
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(GatewayConnectionError, match="Connection error"):
             client.get("/api/health")
-
-    assert exc.value.code == 1
 
 
 def test_apiclient_post_success_builds_json_request() -> None:
@@ -89,36 +83,30 @@ def test_apiclient_post_success_builds_json_request() -> None:
     assert urlopen.call_args.kwargs["timeout"] == 10
 
 
-def test_apiclient_post_exits_on_http_error_with_json_body() -> None:
+def test_apiclient_post_raises_request_error_on_http_error_with_json_body() -> None:
     client = APIClient("http://example.test")
     error = FakeHTTPError(body=b'{"error": "not allowed"}', code=403, reason="forbidden")
 
     with patch("urllib.request.urlopen", side_effect=error):
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(GatewayRequestError, match=r"API error \(403\): not allowed"):
             client.post("/api/route", {"text": "hello"})
 
-    assert exc.value.code == 1
 
-
-def test_apiclient_post_exits_on_http_error_with_non_json_body() -> None:
+def test_apiclient_post_raises_request_error_on_http_error_with_non_json_body() -> None:
     client = APIClient("http://example.test")
     error = FakeHTTPError(body=b"not-json", code=500, reason="server broke")
 
     with patch("urllib.request.urlopen", side_effect=error):
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(GatewayRequestError, match="HTTP error: server broke"):
             client.post("/api/route", {"text": "hello"})
 
-    assert exc.value.code == 1
 
-
-def test_apiclient_post_exits_on_urlerror() -> None:
+def test_apiclient_post_raises_connection_error_on_urlerror() -> None:
     client = APIClient("http://example.test")
 
     with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("down")):
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(GatewayConnectionError, match="Connection error"):
             client.post("/api/route", {"text": "hello"})
-
-    assert exc.value.code == 1
 
 
 def test_format_human_devices_covers_display_audio_and_default_count() -> None:
@@ -187,12 +175,12 @@ def test_build_parser_supports_debug_and_subcommands() -> None:
     assert parsed.response_id == "resp1"
 
 
-def test_main_reraises_systemexit_from_command_handler() -> None:
+def test_main_reraises_systemexit_from_command_execution() -> None:
     parser = MagicMock()
     parser.parse_args.return_value = Namespace(command="devices", debug=False, human=False, api_url="http://test")
 
     with patch("oi_cli.build_parser", return_value=parser):
-        with patch("oi_cli.cmd_devices", side_effect=SystemExit(7)):
+        with patch("oi_cli.execute_command", side_effect=SystemExit(7)):
             with pytest.raises(SystemExit) as exc:
                 main([])
 
@@ -204,7 +192,7 @@ def test_main_returns_one_and_prints_traceback_in_debug_mode() -> None:
     parser.parse_args.return_value = Namespace(command="devices", debug=True, human=False, api_url="http://test")
 
     with patch("oi_cli.build_parser", return_value=parser):
-        with patch("oi_cli.cmd_devices", side_effect=RuntimeError("boom")):
+        with patch("oi_cli.execute_command", side_effect=RuntimeError("boom")):
             with patch("traceback.print_exc") as print_exc:
                 assert main([]) == 1
 
