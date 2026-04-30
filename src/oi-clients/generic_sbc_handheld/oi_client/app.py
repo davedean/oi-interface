@@ -1185,8 +1185,8 @@ class HandheldApp:
 
         # Main content area based on mode
         if self._ui_mode == UIMode.CONNECTING:
-            self.renderer.draw_card("Connecting", [pick_connecting_quip(self._spinner_frame), "Attempting to reach oi-gateway..."], 0, ascii_bg_lines=blob)
-            self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
+            self.renderer.draw_card("Connecting", [pick_connecting_quip(self._spinner_frame), f"Attempting to reach {self.gateway_url}..."], 0, ascii_bg_lines=blob)
+            self.renderer.draw_spinner(self.width_center(40), self.renderer.spinner_y(), self._spinner_frame)
 
         elif self._ui_mode == UIMode.READY or self._ui_mode == UIMode.HOME:
             if self._device_control.is_muted():
@@ -1208,7 +1208,7 @@ class HandheldApp:
             progress_body = "\n".join(waiting_lines)
             self._progress_scroll = self._max_card_scroll("Waiting", progress_body)
             self.renderer.draw_card("Waiting", waiting_lines, self._progress_scroll, ascii_bg_lines=blob)
-            self.renderer.draw_spinner(self.width_center(40), 180, self._spinner_frame)
+            self.renderer.draw_spinner(self.width_center(40), self.renderer.spinner_y(), self._spinner_frame)
 
         elif self._ui_mode == UIMode.CARD:
             body_lines = self._card.body.split("\n")
@@ -1345,8 +1345,7 @@ class HandheldApp:
         from oi_client.renderer import RenderColors
 
         # Draw a small character preview box
-        box_x, box_y = 10, 34
-        box_w, box_h = 160, 26
+        box_x, box_y, box_w, box_h = self.renderer.character_box_rect()
         self.renderer._rect(box_x, box_y, box_w, box_h, RenderColors.card_bg)
 
         # Draw pulsing dot animation for idle state
@@ -1385,14 +1384,14 @@ class HandheldApp:
         return "A=Select  B=Back  Start=Menu"
 
     def width_center(self, text_width: int) -> int:
-        return (480 - text_width) // 2
+        return self.renderer.center_x(text_width)
 
     def _max_card_scroll(self, title: str, body_text: str) -> int:
         """Compute max vertical scroll for current card content."""
         body_lines = body_text.split("\n") if body_text else []
         card_w = self.renderer.width - 20
         card_h = self.renderer.height - 90
-        visible_h = max(0, card_h - 46)  # matches renderer body viewport
+        visible_h = max(0, card_h - (self.renderer.line_height() + self.renderer._scaled_px(28)))
 
         total_lines = 0
         for line in body_lines:
@@ -1402,7 +1401,7 @@ class HandheldApp:
             wrapped = self.renderer._wrap_text(line, self.renderer._font_body, card_w - 20)
             total_lines += max(1, len(wrapped))
 
-        content_h = total_lines * 18
+        content_h = total_lines * self.renderer.line_height()
         return max(0, content_h - visible_h)
 
     # ------------------------------------------------------------------

@@ -80,6 +80,20 @@ def test_draw_helpers_render_text_when_texture_exists(monkeypatch) -> None:
 
 
 
-def test_effective_text_grid_is_fixed() -> None:
-    renderer = Sdl2Renderer()
-    assert renderer.effective_text_grid() == (40, 18)
+def test_layout_helpers_adapt_to_renderer_size() -> None:
+    renderer = Sdl2Renderer(width=640, height=480)
+
+    assert renderer.center_x(40) == 300
+    assert renderer.spinner_y() > 180
+    _, _, box_w, box_h = renderer.character_box_rect()
+    assert box_w >= 160
+    assert box_h >= 26
+
+
+def test_effective_text_grid_grows_with_size() -> None:
+    small = Sdl2Renderer(width=480, height=320)
+    large = Sdl2Renderer(width=640, height=480)
+
+    assert small.effective_text_grid() == (40, 18)
+    assert large.effective_text_grid()[0] > small.effective_text_grid()[0]
+    assert large.effective_text_grid()[1] > small.effective_text_grid()[1]

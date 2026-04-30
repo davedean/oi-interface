@@ -20,6 +20,9 @@ APP_ROOT_SET=false
 LAUNCHER_ROOT_SET=false
 PORTMASTER_ROOT=""
 LAYOUT_PROFILE="manual"
+DEFAULT_GATEWAY_URL="ws://localhost:8788/datp"
+GATEWAY_URL=""
+DEVICE_ID=""
 APP_DIR_NAME="Oi"
 LAUNCHER_NAME="Oi.sh"
 HOST="${DEFAULT_HOST}"
@@ -39,7 +42,9 @@ Options:
   --launcher-root PATH  Remote launcher root (default: auto / ${DEFAULT_LAUNCHER_ROOT})
   --app-dir NAME        Remote app directory name under app root (default: ${APP_DIR_NAME})
   --launcher NAME       Remote launcher filename in launcher root (default: ${LAUNCHER_NAME})
-  --dry-run           Print actions without executing them
+  --gateway-url URL     Gateway WebSocket URL to write into config/launcher
+  --device-id ID        Device id to write into config/launcher
+  --dry-run             Print actions without executing them
   --backup            Backup existing device files before deployment
   --no-launcher       Skip deploying launcher script
   --verbose           Show rsync itemized changes
@@ -84,6 +89,16 @@ while [[ $# -gt 0 ]]; do
             LAUNCHER_NAME="$2"
             shift 2
             ;;
+        --gateway-url)
+            [[ $# -ge 2 ]] || { echo "ERROR: --gateway-url requires a value" >&2; exit 1; }
+            GATEWAY_URL="$2"
+            shift 2
+            ;;
+        --device-id)
+            [[ $# -ge 2 ]] || { echo "ERROR: --device-id requires a value" >&2; exit 1; }
+            DEVICE_ID="$2"
+            shift 2
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -117,6 +132,7 @@ SOURCE_CLIENT_DIR="${SOURCE_ROOT}/oi_client"
 SOURCE_LAUNCHER_TEMPLATE="${SOURCE_ROOT}/Oi.sh"
 SOURCE_CAPABILITY_PROFILE="${SOURCE_ROOT}/capability-profile.json"
 DEFAULT_DEVICE_ID="$(printf '%s' "${APP_DIR_NAME}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')-001"
+DEVICE_ID="${DEVICE_ID:-${DEFAULT_DEVICE_ID}}"
 
 compute_target_paths() {
     TARGET_DIR="${APP_ROOT}/${APP_DIR_NAME}"
@@ -200,12 +216,57 @@ copy_file() {
     fi
 }
 
+sed_escape() {
+    printf '%s' "$1" | sed -e 's/[&#]/\\&/g'
+}
+
 generate_launcher() {
     local out="$1"
+    local launcher_gateway
+    launcher_gateway="$(sed_escape "${GATEWAY_URL:-${DEFAULT_GATEWAY_URL}}")"
     sed \
-        -e "s#__OI_APP_DIR__#${APP_DIR_NAME}#g" \
-        -e "s#__OI_DEFAULT_DEVICE_ID__#${DEFAULT_DEVICE_ID}#g" \
+        -e "s#__OI_APP_DIR__#$(sed_escape "${APP_DIR_NAME}")#g" \
+        -e "s#__OI_DEFAULT_DEVICE_ID__#$(sed_escape "${DEVICE_ID}")#g" \
+        -e "s#__OI_DEFAULT_GATEWAY_URL__#${launcher_gateway}#g" \
         "$SOURCE_LAUNCHER_TEMPLATE" > "$out"
+}
+
+write_remote_config() {
+    local config_path="${TARGET_DIR}/config.json"
+    echo "=== Syncing runtime config ==="
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] ssh ${HOST} env CONFIG_PATH=${config_path} GATEWAY_URL=${GATEWAY_URL:-<preserve-or-default>} DEVICE_ID=${DEVICE_ID} python3 ..."
+        return 0
+    fi
+
+    ssh "$HOST" \
+        env CONFIG_PATH="$config_path" DEFAULT_GATEWAY_URL="$DEFAULT_GATEWAY_URL" GATEWAY_URL="$GATEWAY_URL" DEVICE_ID="$DEVICE_ID" DEVICE_TYPE="sbc-handheld" \
+        python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["CONFIG_PATH"])
+cfg = {}
+if path.is_file():
+    try:
+        cfg = json.loads(path.read_text())
+    except Exception:
+        cfg = {}
+if not cfg:
+    cfg.update({
+        "gateway_url": os.environ.get("DEFAULT_GATEWAY_URL", "ws://localhost:8788/datp"),
+        "device_id": os.environ.get("DEVICE_ID", "sbc-handheld-001"),
+        "device_type": os.environ.get("DEVICE_TYPE", "sbc-handheld"),
+    })
+if os.environ.get("GATEWAY_URL"):
+    cfg["gateway_url"] = os.environ["GATEWAY_URL"]
+if os.environ.get("DEVICE_ID"):
+    cfg["device_id"] = os.environ["DEVICE_ID"]
+cfg.setdefault("device_type", os.environ.get("DEVICE_TYPE", "sbc-handheld"))
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+PY
 }
 
 sync_client_with_rsync() {
@@ -282,6 +343,8 @@ echo "Launcher root:    ${LAUNCHER_ROOT}"
 echo "App dir:          ${APP_DIR_NAME}"
 echo "Target dir:       ${TARGET_DIR}"
 echo "Launcher:         ${LAUNCHER_NAME}"
+echo "Gateway URL:      ${GATEWAY_URL:-<preserve existing or default ${DEFAULT_GATEWAY_URL}>}"
+echo "Device ID:        ${DEVICE_ID}"
 echo "Source root:      ${SOURCE_ROOT}"
 echo "Deploy launcher:  ${DEPLOY_LAUNCHER}"
 echo "Dry run:          ${DRY_RUN}"
@@ -333,6 +396,7 @@ fi
 echo ""
 echo "=== Syncing top-level runtime files ==="
 copy_file "$SOURCE_CAPABILITY_PROFILE" "${TARGET_DIR}/capability-profile.json"
+write_remote_config
 if [[ "$DEPLOY_LAUNCHER" == true ]]; then
     tmp_launcher="$(mktemp)"
     generate_launcher "$tmp_launcher"

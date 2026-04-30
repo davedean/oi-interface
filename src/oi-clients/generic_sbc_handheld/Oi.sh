@@ -74,7 +74,7 @@ $ESUDO pkill -f "python3.*oi_client" 2>/dev/null || true
 
 # Create default config if missing
 if [ ! -f "$GAMEDIR/config.json" ]; then
-  echo '{"gateway_url": "ws://gateway.local:8788/datp", "device_id": "__OI_DEFAULT_DEVICE_ID__", "device_type": "sbc-handheld"}' > "$GAMEDIR/config.json"
+  echo '{"gateway_url": "__OI_DEFAULT_GATEWAY_URL__", "device_id": "__OI_DEFAULT_DEVICE_ID__", "device_type": "sbc-handheld"}' > "$GAMEDIR/config.json"
 fi
 
 if ! python3 -c 'import sdl2' >/dev/null 2>&1; then

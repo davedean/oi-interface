@@ -25,9 +25,14 @@ if os.path.isdir(VENDOR_LIB) and VENDOR_LIB not in sys.path:
 
 # PortMaster fallback for pysdl2
 if "sdl2" not in sys.modules:
-    pm_exlibs = "/storage/roms/ports/PortMaster/exlibs"
-    if os.path.isdir(pm_exlibs) and pm_exlibs not in sys.path:
-        sys.path.insert(0, pm_exlibs)
+    for pm_exlibs in (
+        "/mnt/mmc/MUOS/PortMaster/exlibs",
+        "/storage/roms/ports/PortMaster/exlibs",
+        "/roms/ports/PortMaster/exlibs",
+    ):
+        if os.path.isdir(pm_exlibs) and pm_exlibs not in sys.path:
+            sys.path.insert(0, pm_exlibs)
+            break
 
 
 # ------------------------------------------------------------------

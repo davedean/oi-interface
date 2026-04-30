@@ -47,6 +47,21 @@ class StubRenderer:
     def effective_text_grid(self):
         return (40, 18)
 
+    def center_x(self, text_width):
+        return (self.width - text_width) // 2
+
+    def spinner_y(self):
+        return int(self.height * 0.56)
+
+    def character_box_rect(self):
+        return (10, 34, 160, 26)
+
+    def line_height(self):
+        return 18
+
+    def _scaled_px(self, value):
+        return value
+
     def _wrap_text(self, line, font, width):
         return [line[:10], line[10:]] if len(line) > 10 else [line]
 
@@ -422,6 +437,18 @@ def test_ascii_character_size_small_uses_mini_frames(monkeypatch) -> None:
 
     assert len(blob) == 1
     assert blob[0] in {"(o_o)♪", "(^_^)♫"}
+
+
+def test_width_center_uses_renderer_width(monkeypatch) -> None:
+    monkeypatch.setattr(app_mod, "Sdl2Input", StubInput)
+    monkeypatch.setattr(app_mod, "Sdl2Renderer", StubRenderer)
+    monkeypatch.setattr(app_mod, "HandheldAudio", StubAudio)
+    monkeypatch.setattr(HandheldApp, "_get_version", lambda self: "testver")
+
+    app = HandheldApp("ws://gateway/datp", "dev1", "handheld")
+    app.renderer.width = 640
+
+    assert app.width_center(40) == 300
 
 
 @pytest.mark.asyncio
