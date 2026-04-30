@@ -74,7 +74,6 @@ oi-project-docs/             ← public specs and architecture docs
 | Document | Purpose |
 |---|---|
 | [`context.md`](context.md) | Current repo context, findings, and validation notes |
-| [`progress.md`](progress.md) | Latest work summary and notes |
 | [`BIG_TIDY_UP_PLAN.md`](BIG_TIDY_UP_PLAN.md) | Broader cleanup and follow-up plan |
 | [`PI_GATEWAY_INTEGRATION_PLAN.md`](PI_GATEWAY_INTEGRATION_PLAN.md) | Pi gateway integration notes |
 | [`OI_GATEWAY_FIRST_PASS_REVIEW.md`](OI_GATEWAY_FIRST_PASS_REVIEW.md) | Gateway review notes |
