@@ -16,16 +16,22 @@ oi-sim --gateway ws://localhost:8787/datp --device-id oi-sim-repl-001
 
 In the REPL, type `help` for available commands (`hold`, `release`, `text`, `tap`, etc).
 
-- TODO: add a scripted/non-interactive usage example.
-- TODO: document expected gateway startup sequence for first-time setup.
+For scripted usage from Python, create an `OiSim`, connect it, then call helpers such as
+`send_text_prompt()`, `press_long_hold()`, `release()`, or `replay_fixture()` from
+`src/sim/fixtures.py`.
+
+Typical first-time local setup:
+1. Start `oi-gateway` so DATP is listening on `ws://localhost:8787/datp`.
+2. Install the simulator in editable mode with dev dependencies.
+3. Launch `oi-sim` and use `text`, `hold`, `release`, or `events` to inspect the flow.
 
 ## Development (rough)
 
 - Core code lives in `src/sim/`.
 - REPL entrypoint is `src/sim/repl.py`.
 - Keep simulator behavior aligned with gateway protocol/state expectations.
-
-- TODO: add a short "change checklist" for state-machine edits.
+- When state-machine semantics change, update both `src/sim/state.py` and the focused
+  simulator/state tests in `tests/test_sim.py` and `tests/test_sim_unit.py` together.
 
 ## Testing (rough)
 
@@ -34,4 +40,14 @@ cd src/oi-sim
 pytest
 ```
 
-- TODO: add a minimal end-to-end smoke test recipe (gateway + sim).
+Minimal smoke test:
+```bash
+# terminal 1
+cd src/oi-gateway
+PYTHONPATH=src python -m gateway_app
+
+# terminal 2
+cd src/oi-sim
+oi-sim --gateway ws://localhost:8787/datp --device-id oi-sim-smoke
+```
+Then run `text hello`, `hold`, `release`, and `events` in the REPL to verify the round-trip.
