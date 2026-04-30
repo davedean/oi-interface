@@ -4,8 +4,10 @@ from __future__ import annotations
 import os
 import shlex
 from .backend import AgentBackend
+from .codex_backend import CodexBackend
 from .hermes_backend import HermesBackend
 from .openclaw_backend import OpenClawBackend
+from .opencode_backend import OpenCodeBackend
 from .pi_backend import SubprocessPiBackend
 
 
@@ -35,5 +37,15 @@ def create_backend_from_env() -> AgentBackend:
             raise ValueError("OI_OPENCLAW_TOKEN is required when OI_AGENT_BACKEND=openclaw")
         timeout_seconds = float(os.getenv("OI_OPENCLAW_TIMEOUT_SECONDS", "120"))
         return OpenClawBackend(url=url, token=token, timeout_seconds=timeout_seconds)
+
+    if backend == "opencode":
+        command = os.getenv("OI_OPENCODE_COMMAND")
+        timeout_seconds = float(os.getenv("OI_OPENCODE_TIMEOUT_SECONDS", "120"))
+        return OpenCodeBackend.from_command_text(command, timeout_seconds=timeout_seconds)
+
+    if backend == "codex":
+        command = os.getenv("OI_CODEX_COMMAND")
+        timeout_seconds = float(os.getenv("OI_CODEX_TIMEOUT_SECONDS", "120"))
+        return CodexBackend.from_command_text(command, timeout_seconds=timeout_seconds)
 
     raise ValueError(f"Unsupported OI_AGENT_BACKEND: {backend}")

@@ -18,6 +18,8 @@ Backend selection (from `src/channel/factory.py`):
 - `OI_AGENT_BACKEND=pi` (default; expects `pi` command on PATH, or set `OI_PI_COMMAND`)
 - `OI_AGENT_BACKEND=hermes` (requires `OI_HERMES_BASE_URL` + `OI_HERMES_API_KEY`)
 - `OI_AGENT_BACKEND=openclaw` (requires `OI_OPENCLAW_TOKEN`; see `OPENCLAW.md`)
+- `OI_AGENT_BACKEND=opencode` (uses `opencode run --format json ...`; optional `OI_OPENCODE_COMMAND`)
+- `OI_AGENT_BACKEND=codex` (uses `codex exec --json ...`; optional `OI_CODEX_COMMAND`)
 
 ## Development
 
