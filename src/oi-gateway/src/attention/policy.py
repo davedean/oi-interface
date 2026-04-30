@@ -177,9 +177,11 @@ class AttentionPolicy:
             True if attention was acquired, False if denied.
         """
         # Check priority - can we overtake current attention? (check BEFORE releasing)
+        requested_priority = priority if priority is not None else self._config.default_priority
+
         if self._current_attention and self._current_attention != device_id:
             current_state = self._device_attention.get(self._current_attention)
-            new_priority = priority if priority is not None else self._config.default_priority
+            new_priority = requested_priority
             attention_interrupted = False
 
             if self._config.enable_priority and current_state and current_state.priority > new_priority:
@@ -190,7 +192,7 @@ class AttentionPolicy:
                     current_state.priority,
                 )
                 # Queue device for attention when current releases
-                self._queue_for_attention(device_id, priority or self._config.default_priority)
+                self._queue_for_attention(device_id, requested_priority)
                 return False
 
             if self._config.enable_priority and current_state and current_state.priority < new_priority:
@@ -219,12 +221,13 @@ class AttentionPolicy:
                 device_id=device_id,
                 state=ATTENTION_ACTIVE,
                 acquired_at=now,
-                priority=priority or self._config.default_priority,
+                priority=requested_priority,
             )
         else:
             state.state = ATTENTION_ACTIVE
             state.acquired_at = now
-            state.priority = priority or state.priority
+            if priority is not None:
+                state.priority = priority
 
         state.last_activity = now
         state.reason = reason

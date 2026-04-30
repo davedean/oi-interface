@@ -154,6 +154,16 @@ class TestAttentionPolicy:
         assert result is True
         assert policy.current_attention == "stick-002"
 
+    def test_acquire_attention_preserves_explicit_zero_priority(self):
+        """An explicit zero priority should not be replaced with the default."""
+        policy = AttentionPolicy(config=AttentionConfig(default_priority=5))
+        policy.acquire_attention(device_id="stick-001", priority=0)
+
+        state = policy.get_attention_state("stick-001")
+
+        assert state is not None
+        assert state.priority == 0
+
     def test_release_attention(self):
         """Test releasing attention."""
         policy = AttentionPolicy()
