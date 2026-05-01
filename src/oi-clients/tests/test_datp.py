@@ -78,6 +78,18 @@ async def test_connect_sends_hello_and_starts_listener(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_connect_returns_false_on_handshake_malformed_json(monkeypatch) -> None:
+    ws = FakeWebSocket(["not-json"])
+    monkeypatch.setattr("websockets.connect", AsyncMock(return_value=ws))
+
+    client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
+
+    assert await client.connect() is False
+    assert ws.closed is True
+    assert client.is_connected is False
+
+
+@pytest.mark.asyncio
 async def test_connect_returns_false_on_unexpected_hello_ack(monkeypatch) -> None:
     ws = FakeWebSocket([json.dumps({"type": "ack", "payload": {}})])
     monkeypatch.setattr("websockets.connect", AsyncMock(return_value=ws))
@@ -90,7 +102,7 @@ async def test_connect_returns_false_on_unexpected_hello_ack(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_handle_command_updates_state_sends_ack_and_queues_payload() -> None:
+async def test_handle_command_queues_payload_for_app_ack() -> None:
     client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
     ws = FakeWebSocket()
     client._ws = ws
@@ -104,7 +116,10 @@ async def test_handle_command_updates_state_sends_ack_and_queues_payload() -> No
     )
 
     assert client.state == State.READY
-    assert client.get_commands() == [{"op": "display.show_card", "args": {"title": "Done"}}]
+    assert client.get_commands() == [{"id": "cmd1", "op": "display.show_card", "args": {"title": "Done"}}]
+    assert ws.sent_messages == []
+
+    await client.ack_command("cmd1", True, op="display.show_card", args={"title": "Done"})
     assert ws.sent_messages[-1]["type"] == "ack"
     assert ws.sent_messages[-1]["payload"]["command_id"] == "cmd1"
 
@@ -209,7 +224,12 @@ async def test_send_audio_chunk_encodes_pcm_as_base64() -> None:
     assert msg["payload"]["stream_id"] == "stream1"
     assert msg["payload"]["seq"] == 7
     assert msg["payload"]["sample_rate"] == 24000
+    assert msg["payload"]["channels"] == 1
     assert base64.b64decode(msg["payload"]["data_b64"]) == b"\x01\x02\x03\x04"
+
+    await client.send_audio_chunk("stream1", 8, b"stereo", sample_rate=48000, channels=2)
+    assert ws.sent_messages[-1]["payload"]["sample_rate"] == 48000
+    assert ws.sent_messages[-1]["payload"]["channels"] == 2
 
 
 @pytest.mark.asyncio

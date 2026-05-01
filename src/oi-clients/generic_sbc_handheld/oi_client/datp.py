@@ -132,10 +132,10 @@ class DatpClient:
                 "conversation": conversation,
             },
         }
-        await self._ws.send(json.dumps(hello))
-
-        # Wait for hello_ack
         try:
+            await self._ws.send(json.dumps(hello))
+
+            # Wait for hello_ack
             raw = await asyncio.wait_for(self._ws.recv(), timeout=5.0)
             resp = json.loads(raw)
             if resp.get("type") != "hello_ack":
@@ -143,7 +143,8 @@ class DatpClient:
                 return False
             self._session_id = resp.get("payload", {}).get("session_id")
             self._server_info = resp
-        except asyncio.TimeoutError:
+        except Exception as exc:
+            print(f"Handshake failed: {exc}")
             await self.disconnect()
             return False
 
@@ -217,6 +218,7 @@ class DatpClient:
             op = payload.get("op", "")
             args = payload.get("args", {})
             queued = {
+                "id": msg.get("id", ""),
                 "op": op,
                 "args": args,
             }
@@ -225,7 +227,6 @@ class DatpClient:
             if len(self._received_commands) > 100:
                 self._received_commands = self._received_commands[-100:]
             await self._cmd_queue.put(queued)
-            await self.ack_command(msg.get("id", ""), True, op=op, args=args)
 
         elif msg_type == "error":
             code = payload.get("code", "")
@@ -323,13 +324,13 @@ class DatpClient:
         payload.update({k: v for k, v in extra_fields.items() if v is not None})
         await self._send("state", payload)
 
-    async def send_audio_chunk(self, stream_id: str, seq: int, pcm16_data: bytes, sample_rate: int = 16000) -> None:
+    async def send_audio_chunk(self, stream_id: str, seq: int, pcm16_data: bytes, sample_rate: int = 16000, channels: int = 1) -> None:
         await self._send("audio_chunk", {
             "stream_id": stream_id,
             "seq": seq,
             "format": "pcm16",
             "sample_rate": sample_rate,
-            "channels": 1,
+            "channels": channels,
             "data_b64": base64.b64encode(pcm16_data).decode(),
         })
 

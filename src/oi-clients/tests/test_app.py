@@ -242,7 +242,7 @@ async def test_stream_recorded_audio_sends_incremental_chunks(app: HandheldApp, 
 
     await app._stream_recorded_audio()
 
-    app.datp.send_audio_chunk.assert_awaited_once_with("rec-live", 3, b"live-chunk", 16000)
+    app.datp.send_audio_chunk.assert_awaited_once_with("rec-live", 3, b"live-chunk", 16000, 1)
     assert app._record_tx_seq == 4
     assert "Streaming audio" in app._card.body
 
@@ -267,7 +267,7 @@ async def test_release_stops_recording_even_without_long_release_event(app: Hand
 
     assert app.audio.is_recording is False
     assert app._ui_mode == UIMode.WAITING
-    app.datp.send_audio_chunk.assert_awaited_once_with("rec-release", 0, b"tail", 16000)
+    app.datp.send_audio_chunk.assert_awaited_once_with("rec-release", 0, b"tail", 16000, 1)
     app.datp.send_recording_finished.assert_awaited_once_with("rec-release", 1000)
 
 
@@ -291,10 +291,80 @@ async def test_recording_auto_stops_after_max_duration(app: HandheldApp, monkeyp
 
     assert app.audio.is_recording is False
     assert app._ui_mode == UIMode.WAITING
-    app.datp.send_audio_chunk.assert_awaited_once_with("rec-timeout", 0, b"final", 16000)
+    app.datp.send_audio_chunk.assert_awaited_once_with("rec-timeout", 0, b"final", 16000, 1)
     finished_args = app.datp.send_recording_finished.await_args.args
     assert finished_args[0] == "rec-timeout"
     assert 3099 <= finished_args[1] <= 3100
+
+
+@pytest.mark.asyncio
+async def test_b_cancels_recording_without_sending_finished(app: HandheldApp) -> None:
+    app.datp = SimpleNamespace(is_connected=True, send_recording_finished=AsyncMock())
+    app._online = True
+    app.audio.recording = True
+    app._ui_mode = UIMode.RECORDING
+    app._record_tx_stream_id = "rec-cancel"
+    app._record_tx_seq = 5
+
+    await app._handle_input(SimpleNamespace(type="button", name="b", action="pressed", raw=0))
+
+    assert app.audio.is_recording is False
+    assert app._ui_mode == UIMode.HOME
+    assert app._card.body == "Voice cancelled"
+    assert app._record_tx_stream_id is None
+    assert app._record_tx_seq == 0
+    app.datp.send_recording_finished.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tick_nacks_command_when_handler_raises(app: HandheldApp) -> None:
+    app._draw_frame = lambda: None
+    app._maybe_send_state_report = AsyncMock()
+    app._stream_recorded_audio = AsyncMock()
+    app._maybe_auto_stop_recording = AsyncMock()
+    app.input.poll = lambda: []
+    app.datp = SimpleNamespace(
+        is_connected=True,
+        get_commands=lambda: [{"id": "cmd-bad", "op": "bad.op", "args": {}}],
+        ack_command=AsyncMock(),
+    )
+    app._handle_command = lambda _cmd: (_ for _ in ()).throw(RuntimeError("boom"))
+
+    await app._tick()
+
+    app.datp.ack_command.assert_awaited_once_with("cmd-bad", False, op="bad.op", args={})
+
+
+@pytest.mark.asyncio
+async def test_tick_acks_commands_after_handler_result(app: HandheldApp) -> None:
+    app._draw_frame = lambda: None
+    app._maybe_send_state_report = AsyncMock()
+    app._stream_recorded_audio = AsyncMock()
+    app._maybe_auto_stop_recording = AsyncMock()
+    app.input.poll = lambda: []
+    app.datp = SimpleNamespace(
+        is_connected=True,
+        get_commands=lambda: [{"id": "cmd-ok", "op": "display.show_card", "args": {"title": "Hi"}}],
+        ack_command=AsyncMock(),
+    )
+
+    await app._tick()
+
+    app.datp.ack_command.assert_awaited_once_with("cmd-ok", True, op="display.show_card", args={"title": "Hi"})
+
+
+@pytest.mark.asyncio
+async def test_recording_stream_uses_actual_capture_format(app: HandheldApp) -> None:
+    app.datp = SimpleNamespace(is_connected=True, send_audio_chunk=AsyncMock())
+    app.audio.recording = True
+    app.audio.pending = b"stereo"
+    app.audio.recording_info = lambda: {"is_recording": True, "sample_rate": 48000, "channels": 2}
+    app._ui_mode = UIMode.RECORDING
+    app._record_tx_stream_id = "rec-format"
+
+    await app._stream_recorded_audio()
+
+    app.datp.send_audio_chunk.assert_awaited_once_with("rec-format", 0, b"stereo", 48000, 2)
 
 
 @pytest.mark.asyncio

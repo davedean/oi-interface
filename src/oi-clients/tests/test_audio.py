@@ -48,7 +48,7 @@ def test_start_and_write_pcm_stream(monkeypatch) -> None:
     assert stream.getvalue() == b"abc"
 
     audio.end_pcm_stream()
-    assert audio._stream_proc is None
+    assert audio._stream_proc is proc
 
 
 def test_write_pcm_stream_returns_false_without_active_process() -> None:
@@ -56,23 +56,37 @@ def test_write_pcm_stream_returns_false_without_active_process() -> None:
     assert audio.write_pcm_stream(b"abc") is False
 
 
+def test_end_pcm_stream_clears_finished_process() -> None:
+    audio = HandheldAudio()
+    audio._stream_proc = FakeProc(running=False, stdin=io.BytesIO())
+
+    audio.end_pcm_stream()
+
+    assert audio._stream_proc is None
+
+
 def test_stop_terminates_stream_and_clears_playing(monkeypatch) -> None:
     monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: None)
     audio = HandheldAudio()
     audio._stream_proc = FakeProc(stdin=io.BytesIO())
+    audio._play_proc = FakeProc()
     audio._playing = True
 
     audio.stop()
 
     assert audio._stream_proc is None
+    assert audio._play_proc is None
     assert audio._playing is False
 
 
-def test_is_playing_uses_pgrep_result(monkeypatch) -> None:
-    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: Mock(returncode=0))
+def test_is_playing_tracks_owned_process_only() -> None:
     audio = HandheldAudio()
+    audio._play_proc = FakeProc(running=True)
 
     assert audio.is_playing() is True
+
+    audio._play_proc.terminate()
+    assert audio.is_playing() is False
 
 
 def test_save_wav_writes_header_and_pcm(tmp_path: Path, monkeypatch) -> None:

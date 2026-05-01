@@ -32,6 +32,7 @@ class HandheldAudio:
     def __init__(self) -> None:
         self._playing = False
         self._status = AudioStatus()
+        self._play_proc: subprocess.Popen | None = None
         self._stream_proc: subprocess.Popen | None = None
 
     def detect(self) -> AudioStatus:
@@ -71,12 +72,13 @@ class HandheldAudio:
             return False
 
         try:
-            proc = subprocess.Popen(
+            self.stop()
+            self._play_proc = subprocess.Popen(
                 ["aplay", "-q", str(wav_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            self._playing = proc.poll() is None
+            self._playing = self._play_proc.poll() is None
             logger.info("aplay started path=%s ok=%s", wav_path, self._playing)
             return self._playing
         except FileNotFoundError:
@@ -87,21 +89,21 @@ class HandheldAudio:
             return False
 
     def stop(self) -> None:
-        """Kill any running aplay process."""
-        try:
-            if self._stream_proc and self._stream_proc.poll() is None:
-                self._stream_proc.terminate()
-            self._stream_proc = None
-            subprocess.run(["pkill", "-f", "aplay"], capture_output=True)
-        except Exception:
-            pass
+        """Stop playback started by this adapter only."""
+        for attr in ("_stream_proc", "_play_proc"):
+            proc = getattr(self, attr, None)
+            try:
+                if proc and proc.poll() is None:
+                    proc.terminate()
+            except Exception:
+                pass
+            setattr(self, attr, None)
         self._playing = False
 
     def start_pcm_stream(self, sample_rate: int = 24000, channels: int = 1) -> bool:
         """Start streaming raw PCM16LE to aplay stdin."""
         try:
-            if self._stream_proc and self._stream_proc.poll() is None:
-                self._stream_proc.terminate()
+            self.stop()
             self._stream_proc = subprocess.Popen(
                 ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(sample_rate), "-c", str(channels), "-"],
                 stdin=subprocess.PIPE,
@@ -127,24 +129,26 @@ class HandheldAudio:
             return False
 
     def end_pcm_stream(self) -> None:
-        """Finalize active PCM stream playback."""
+        """Finalize active PCM stream playback and let aplay drain buffered audio."""
         try:
             if self._stream_proc and self._stream_proc.stdin:
                 self._stream_proc.stdin.close()
         except Exception:
             pass
-        self._stream_proc = None
+        if self._stream_proc and self._stream_proc.poll() is not None:
+            self._stream_proc = None
 
     def is_playing(self) -> bool:
         """Best-effort check if playback is still active."""
-        try:
-            result = subprocess.run(
-                ["pgrep", "-x", "aplay"],
-                capture_output=True,
-            )
-            self._playing = result.returncode == 0
-        except Exception:
-            self._playing = False
+        playing = False
+        for proc in (self._play_proc, self._stream_proc):
+            try:
+                if proc and proc.poll() is None:
+                    playing = True
+                    break
+            except Exception:
+                continue
+        self._playing = playing
         return self._playing
 
     def save_wav(self, pcm16_data: bytes, sample_rate: int = 16000, channels: int = 1) -> Path:

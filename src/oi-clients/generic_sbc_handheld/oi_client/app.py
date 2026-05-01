@@ -458,7 +458,14 @@ class HandheldApp:
             # Process DATP commands
             if self.datp:
                 for cmd in self.datp.get_commands():
-                    self._handle_command(cmd)
+                    command_id = cmd.get("id", "")
+                    try:
+                        ok = self._handle_command(cmd)
+                    except Exception as exc:
+                        ok = False
+                        logger.exception("command handler failed op=%s id=%s: %s", cmd.get("op", ""), command_id, exc)
+                    if command_id:
+                        await self.datp.ack_command(command_id, ok, op=cmd.get("op", ""), args=cmd.get("args", {}))
                 # Check connection status
                 if not self.datp.is_connected and self._online:
                     self._online = False
@@ -493,7 +500,8 @@ class HandheldApp:
         chunk = self.audio.read_recording()
         if chunk and self.datp and self.datp.is_connected and self._ui_mode == UIMode.RECORDING:
             stream_id = self._record_tx_stream_id or f"rec_{int(self._recording_start_time * 1000)}"
-            await self.datp.send_audio_chunk(stream_id, self._record_tx_seq, chunk, 16000)
+            info = self._recording_audio_info()
+            await self.datp.send_audio_chunk(stream_id, self._record_tx_seq, chunk, info["sample_rate"], info["channels"])
             self._record_tx_seq += 1
             self._card.title = "Recording"
             self._card.body = f"Streaming audio… {len(chunk)} bytes"
@@ -594,6 +602,19 @@ class HandheldApp:
                 self._card.title = "Oi"
                 self._card.body = "Select a prompt"
             self._x_long_press_seen = False
+            return
+
+        if ev.name == "b" and ev.action == "pressed" and self._ui_mode == UIMode.RECORDING:
+            # Local cancel: stop capture without sending recording_finished.
+            if self.audio.is_recording:
+                self.audio.stop_recording()
+            self._record_tx_stream_id = None
+            self._record_tx_seq = 0
+            self._x_long_press_seen = False
+            self._x_pre_recording = False
+            self._ui_mode = UIMode.HOME if self._online else UIMode.OFFLINE
+            self._card.title = "Oi"
+            self._card.body = "Voice cancelled"
             return
 
         if ev.action != "pressed":
@@ -1216,7 +1237,14 @@ class HandheldApp:
         self._recording_sample_rate = _coerce_int(args.get("sample_rate", 24000) or 24000, 24000)
         self._recording_channels = _coerce_int(args.get("channels", 1) or 1, 1)
         if not self._device_control.is_muted() and self._recording_format not in {"wav", "audio/wav", "wave"}:
-            self.audio.start_pcm_stream(sample_rate=self._recording_sample_rate, channels=self._recording_channels)
+            if not self.audio.start_pcm_stream(sample_rate=self._recording_sample_rate, channels=self._recording_channels):
+                logger.warning(
+                    "audio.begin stream playback failed stream_id=%s response_id=%s sr=%s ch=%s",
+                    self._recording_stream_id,
+                    args.get("response_id", "latest"),
+                    self._recording_sample_rate,
+                    self._recording_channels,
+                )
         logger.info(
             "audio.begin stream_id=%s response_id=%s format=%s sr=%s ch=%s",
             self._recording_stream_id,
@@ -1237,7 +1265,8 @@ class HandheldApp:
             return False
         self._recording_chunks.append(chunk)
         if not self._device_control.is_muted() and self._recording_format not in {"wav", "audio/wav", "wave"}:
-            self.audio.write_pcm_stream(chunk)
+            if not self.audio.write_pcm_stream(chunk):
+                logger.warning("audio.chunk live stream write failed stream_id=%s seq=%s", self._recording_stream_id, args.get("seq"))
         logger.debug(
             "audio.chunk stream_id=%s seq=%s bytes=%d total_chunks=%d",
             self._recording_stream_id,
@@ -1564,8 +1593,10 @@ class HandheldApp:
             return "Up/Down=Select  A=Confirm  B=Cancel"
         elif self._ui_mode in (UIMode.ERROR, UIMode.OFFLINE):
             return "A=Retry  B=Quit"
-        elif self._ui_mode == UIMode.WAITING or self._ui_mode == UIMode.RECORDING:
-            return "B=Cancel"
+        elif self._ui_mode == UIMode.RECORDING:
+            return "Release X=Stop  B=Cancel"
+        elif self._ui_mode == UIMode.WAITING:
+            return "B=Back"
         return "A=Select  B=Back  Start=Menu"
 
     def width_center(self, text_width: int) -> int:
@@ -1620,13 +1651,27 @@ class HandheldApp:
         # (spoken before long-press threshold) is preserved.
         pending = self.audio.read_recording()
         if pending and self.datp and self.datp.is_connected:
-            await self.datp.send_audio_chunk(self._record_tx_stream_id, self._record_tx_seq, pending, 16000)
+            info = self._recording_audio_info()
+            await self.datp.send_audio_chunk(self._record_tx_stream_id, self._record_tx_seq, pending, info["sample_rate"], info["channels"])
             self._record_tx_seq += 1
 
         self._x_pre_recording = False
         self._card.title = "Recording"
         self._card.body = "Listening… hold X to talk"
         return True
+
+    def _recording_audio_info(self) -> dict[str, int]:
+        """Return current capture format for outbound audio metadata."""
+        recording_info = getattr(self.audio, "recording_info", None)
+        if callable(recording_info):
+            info = recording_info()
+            sample_rate = _coerce_int(info.get("sample_rate"), 16000)
+            channels = _coerce_int(info.get("channels"), 1)
+            return {
+                "sample_rate": sample_rate if sample_rate > 0 else 16000,
+                "channels": channels if channels > 0 else 1,
+            }
+        return {"sample_rate": 16000, "channels": 1}
 
     async def stop_recording(self) -> None:
         """Stop voice recording and send final event."""
@@ -1640,7 +1685,8 @@ class HandheldApp:
 
         stream_id = self._record_tx_stream_id or f"rec_{int(self._recording_start_time * 1000)}"
         if pending and self.datp and self.datp.is_connected:
-            await self.datp.send_audio_chunk(stream_id, self._record_tx_seq, pending, 16000)
+            info = self._recording_audio_info()
+            await self.datp.send_audio_chunk(stream_id, self._record_tx_seq, pending, info["sample_rate"], info["channels"])
             self._record_tx_seq += 1
 
         if self.datp and self.datp.is_connected:
