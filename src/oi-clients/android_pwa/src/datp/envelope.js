@@ -1,7 +1,7 @@
 const DATP_VERSION = 'datp';
 
 export function nowIso(date = new Date()) {
-  return date.toISOString().replace(/\.\d{3}Z$/, (match) => match);
+  return date.toISOString();
 }
 
 export function newId(prefix = 'msg', random = Math.random) {
