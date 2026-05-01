@@ -15,3 +15,7 @@ Device client target work for Oi devices (firmware and higher-level client runti
 - Prefer small, testable changes.
 - If target setup details are unknown, add explicit `TODO:` placeholders instead of guessing commands or toolchains.
 - Add or update each target's `README.md` when behavior or workflow changes.
+## Android PWA
+
+`android_pwa/` is a lightweight browser/PWA client target for old Android phones. It speaks DATP over WebSocket, captures PTT audio as PCM16 chunks, renders visible Oi states, and plays gateway-returned TTS audio without direct API calls from the phone.
+

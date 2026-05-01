@@ -181,12 +181,16 @@ class DATPServer:
         elif msg_type == "event":
             if await self._maybe_handle_conversation_update(ws, msg_dict):
                 return device_id
+            if msg_dict["payload"].get("event") == "heartbeat" and self.registry is not None:
+                await self.registry.record_heartbeat(device_id)
             self.event_bus.emit("event", device_id, msg_dict["payload"])
         elif msg_type == "audio_chunk":
             self.event_bus.emit("audio_chunk", device_id, msg_dict["payload"])
         elif msg_type == "state":
             self.event_bus.emit("state", device_id, msg_dict["payload"])
             if self.registry is not None:
+                if msg_dict["payload"].get("heartbeat") is True:
+                    await self.registry.record_heartbeat(device_id)
                 await self.registry.device_state_update(device_id, msg_dict["payload"])
         elif msg_type == "command":
             # DATP commands flow gateway→device. A device must not send commands.

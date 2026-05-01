@@ -1,0 +1,18 @@
+html, body, #app { margin: 0; width: 100%; height: 100%; background: #050507; color: #f7f7fb; font-family: system-ui, sans-serif; touch-action: manipulation; }
+.app { min-height: 100%; display: grid; grid-template-rows: auto 1fr auto auto; place-items: center; gap: 1rem; overflow: hidden; }
+.topbar { width: calc(100% - 2rem); display: flex; gap: .5rem; align-items: center; padding: 1rem; font-size: .9rem; opacity: .85; }
+.connection { width: .7rem; height: .7rem; border-radius: 50%; background: #c33; box-shadow: 0 0 1rem #c33; }
+.connection.online { background: #49e56d; box-shadow: 0 0 1rem #49e56d; }
+.face { width: min(62vw, 17rem); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #534dff, #17133d); display: flex; align-items: center; justify-content: center; gap: 18%; box-shadow: 0 0 3rem #252094; transition: transform .2s ease; }
+.eye { width: 14%; height: 14%; border-radius: 50%; background: white; }
+.mouth { position: absolute; width: 18%; height: 4%; border-radius: 1rem; background: white; transform: translateY(260%); }
+.app--listening .face, .app--playing .face { animation: pulse .8s infinite alternate ease-in-out; }
+.app--error .face, .app--blocked .face { background: radial-gradient(circle, #ff5d5d, #3b1111); }
+.transcript { min-height: 3rem; max-width: 85vw; text-align: center; opacity: .9; }
+.controls { display: flex; gap: .75rem; padding: 1rem; }
+button { border: 0; border-radius: 999px; padding: .9rem 1.1rem; background: #24243a; color: white; font: inherit; }
+.ptt { background: #4b45ff; min-width: 9rem; }
+.confirm { max-width: 85vw; padding: 1rem; border: 1px solid #333655; border-radius: 1rem; background: #11131d; text-align: center; }
+.debug { display: none; position: fixed; left: 0; right: 0; bottom: 0; max-height: 35vh; overflow: auto; padding: .75rem; background: rgba(0,0,0,.85); font-family: monospace; font-size: .75rem; }
+.debug.open { display: block; }
+@keyframes pulse { from { transform: scale(1); } to { transform: scale(1.05); } }

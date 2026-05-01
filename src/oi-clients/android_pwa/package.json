@@ -1,0 +1,11 @@
+{
+  "name": "oi-android-pwa-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "python3 -m http.server 8080 --directory .",
+    "test": "node --test tests/**/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-coverage-exclude='src/main.js' --test-coverage-lines=95 --test-coverage-branches=80 --test-coverage-functions=90 tests/**/*.test.js"
+  }
+}

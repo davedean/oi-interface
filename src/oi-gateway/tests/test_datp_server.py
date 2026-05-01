@@ -826,3 +826,62 @@ def test_event_bus_isolates_subscriber_exceptions():
     bus.emit("test_event", "dev1", {})
 
     assert received == ["test_event"]
+
+@pytest.mark.asyncio
+async def test_android_pwa_heartbeat_records_registry_heartbeat():
+    from datp.server import DATPServer
+
+    class FakeRegistry:
+        def __init__(self):
+            self.heartbeats = []
+            self.state_updates = []
+        def _mark_online(self, device_id):
+            pass
+        async def device_registered(self, **kwargs):
+            pass
+        async def record_heartbeat(self, device_id):
+            self.heartbeats.append(device_id)
+        async def device_state_update(self, device_id, payload):
+            self.state_updates.append((device_id, payload))
+
+    class FakeWs:
+        def __init__(self):
+            self.sent = []
+        async def send(self, data):
+            self.sent.append(json.loads(data))
+        async def close(self):
+            pass
+
+    registry = FakeRegistry()
+    server = DATPServer(registry=registry)
+    ws = FakeWs()
+    hello = make_hello("android-pwa-001")
+    hello["payload"]["device_type"] = "android_pwa"
+    hello["payload"]["capabilities"] = {
+        "mic": True,
+        "speaker": True,
+        "display": True,
+        "buttons": True,
+        "touch": True,
+    }
+    await server._dispatch(ws, json.dumps(hello))
+
+    await server._dispatch(ws, json.dumps({
+        "v": "datp",
+        "type": "event",
+        "id": "evt_heartbeat",
+        "device_id": "android-pwa-001",
+        "ts": "2026-04-27T04:41:00.000Z",
+        "payload": {"event": "heartbeat", "connected": True},
+    }))
+    await server._dispatch(ws, json.dumps({
+        "v": "datp",
+        "type": "state",
+        "id": "state_heartbeat",
+        "device_id": "android-pwa-001",
+        "ts": "2026-04-27T04:41:01.000Z",
+        "payload": {"mode": "RECORDING", "heartbeat": True},
+    }))
+
+    assert registry.heartbeats == ["android-pwa-001", "android-pwa-001"]
+    assert registry.state_updates == [("android-pwa-001", {"mode": "RECORDING", "heartbeat": True})]
