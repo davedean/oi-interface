@@ -56,11 +56,7 @@ Oi is an I/O bus for personal agents, not the agent runtime itself.
 ## Repository layout
 
 ```text
-context.md                   ← current repo context and validation notes
-handover.md                  ← latest handoff summary
-BIG_TIDY_UP_PLAN.md          ← broader cleanup plan
-PI_GATEWAY_INTEGRATION_PLAN.md ← Pi gateway integration notes
-src/                         ← v2 implementation
+src/                         ← implementation
   oi-gateway/                ← Python gateway: DATP, registry, STT/TTS, resource tree API
   oi-cli/                    ← CLI wrapper over the gateway API
   oi-dashboard/              ← monitoring and debug dashboard
@@ -73,11 +69,8 @@ oi-project-docs/             ← public specs and architecture docs
 
 | Document | Purpose |
 |---|---|
-| [`context.md`](context.md) | Current repo context, findings, and validation notes |
-| [`BIG_TIDY_UP_PLAN.md`](BIG_TIDY_UP_PLAN.md) | Broader cleanup and follow-up plan |
-| [`PI_GATEWAY_INTEGRATION_PLAN.md`](PI_GATEWAY_INTEGRATION_PLAN.md) | Pi gateway integration notes |
-| [`OI_GATEWAY_FIRST_PASS_REVIEW.md`](OI_GATEWAY_FIRST_PASS_REVIEW.md) | Gateway review notes |
-| [`OI_SIM_FIRST_PASS_REVIEW.md`](OI_SIM_FIRST_PASS_REVIEW.md) | Simulator review notes |
+| [`oi-project-docs/README.md`](oi-project-docs/README.md) | Public documentation entry point |
+| [`oi-project-docs/INDEX.md`](oi-project-docs/INDEX.md) | Public documentation index |
 | [`start-oi.sh`](start-oi.sh) | Launcher for the gateway plus dashboard (`pi`, `hermes`, and `openclaw` backends) |
 | [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md) | OpenClaw backend setup and local wiring |
 | [`src/oi-gateway/hermes.env.example`](src/oi-gateway/hermes.env.example) | Hermes backend env template |
