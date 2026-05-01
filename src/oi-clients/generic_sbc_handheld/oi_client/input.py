@@ -202,7 +202,9 @@ class Sdl2Input:
             elif et == SDL_JOYBUTTONUP:
                 events.append(RawInputEvent("button", "released", int(ev.jbutton.button)))
             elif et == SDL_JOYHATMOTION:
-                events.append(RawInputEvent("hat", "pressed", int(ev.jhat.value), hat=int(ev.jhat.hat)))
+                value = int(ev.jhat.value)
+                action = "released" if value == 0 else "pressed"
+                events.append(RawInputEvent("hat", action, value, hat=int(ev.jhat.hat)))
         return events
 
     def poll(self) -> list[InputEvent]:

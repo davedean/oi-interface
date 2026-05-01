@@ -107,6 +107,7 @@ def test_poll_raw_emits_unmapped_button_and_hat(monkeypatch) -> None:
         _make_poll([
             {"type": input_mod.SDL_JOYBUTTONDOWN, "button": 9},
             {"type": input_mod.SDL_JOYHATMOTION, "hat": 1, "value": 8},
+            {"type": input_mod.SDL_JOYHATMOTION, "hat": 1, "value": 0},
         ]),
     )
     inp = Sdl2Input()
@@ -116,6 +117,7 @@ def test_poll_raw_emits_unmapped_button_and_hat(monkeypatch) -> None:
     assert events == [
         RawInputEvent("button", "pressed", 9, 0),
         RawInputEvent("hat", "pressed", 8, 1),
+        RawInputEvent("hat", "released", 0, 1),
     ]
 
 

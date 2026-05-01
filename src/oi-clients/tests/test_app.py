@@ -353,11 +353,15 @@ async def test_settings_diagnostics_connection_and_system_menu(app: HandheldApp)
     app._online = True
     app.datp = SimpleNamespace(
         reconnect=AsyncMock(return_value=True),
+        send_conversation_update=AsyncMock(),
         update_conversation=lambda **kwargs: None,
         server_info={
             "payload": {
                 "available_backends": [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}],
                 "available_agents": [{"id": "main", "name": "Main"}, {"id": "build", "name": "Build"}],
+                "selected_backend": "pi",
+                "selected_agent": {"id": "main", "name": "Main"},
+                "selected_session_key": "oi:device:test-device",
             }
         },
         is_connected=True,
@@ -379,7 +383,8 @@ async def test_settings_diagnostics_connection_and_system_menu(app: HandheldApp)
     app._menu_idx = app._menu_items().index("Backend")
     await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
     assert app._preferred_backend_id == "pi"
-    app.datp.reconnect.assert_awaited()
+    app.datp.send_conversation_update.assert_awaited_once()
+    app.datp.reconnect.assert_not_awaited()
 
     app._ui_mode = UIMode.MENU
     app._menu_mode = "settings"
@@ -467,6 +472,45 @@ def test_width_center_uses_renderer_width(monkeypatch) -> None:
     app.renderer.width = 640
 
     assert app.width_center(40) == 300
+
+
+@pytest.mark.asyncio
+async def test_run_forces_button_mapping_when_manual_shortcut_pressed(monkeypatch) -> None:
+    monkeypatch.setattr(app_mod, "Sdl2Input", StubInput)
+    monkeypatch.setattr(app_mod, "Sdl2Renderer", StubRenderer)
+    monkeypatch.setattr(app_mod, "HandheldAudio", StubAudio)
+    monkeypatch.setattr(HandheldApp, "_get_version", lambda self: "testver")
+    monkeypatch.setattr(app_mod, "check_manual_mapping_shortcut", AsyncMock(return_value=True))
+    run_map = AsyncMock()
+    monkeypatch.setattr(HandheldApp, "_run_button_mapping", run_map)
+    monkeypatch.setattr(StubAudio, "detect", lambda self: SimpleNamespace(has_input=False, has_output=False), raising=False)
+    monkeypatch.setattr(HandheldApp, "_build_capabilities", lambda self, status: {})
+
+    class StubDatp:
+        def __init__(self, **kwargs):
+            self.is_connected = False
+            self.server_info = None
+
+        async def connect(self):
+            return False
+
+        async def disconnect(self):
+            return None
+
+        def get_commands(self):
+            return []
+
+    monkeypatch.setattr(app_mod, "DatpClient", StubDatp)
+
+    async def stop_after_tick(self):
+        self._running = False
+
+    monkeypatch.setattr(HandheldApp, "_tick", stop_after_tick)
+
+    app = HandheldApp("ws://gateway/datp", "dev1", "handheld")
+    await app.run()
+
+    run_map.assert_awaited_once_with(force=True)
 
 
 @pytest.mark.asyncio

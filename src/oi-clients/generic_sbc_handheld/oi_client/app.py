@@ -19,7 +19,7 @@ from typing import Callable
 
 from oi_client.state import State
 from oi_client.input import Sdl2Input, InputEvent
-from oi_client.button_mapping import run_button_mapping_wizard
+from oi_client.button_mapping import check_manual_mapping_shortcut, run_button_mapping_wizard
 from oi_client.renderer import Sdl2Renderer
 from oi_client.audio import HandheldAudio
 from oi_client.capabilities import build_capabilities
@@ -364,10 +364,11 @@ class HandheldApp:
             self.input.shutdown()
             return
 
-        if (not self.input.has_custom_mapping()) or (
+        force_mapping = await check_manual_mapping_shortcut(self.renderer, self.input)
+        if force_mapping or (not self.input.has_custom_mapping()) or (
             self._button_profile_name and self._button_profile_name != self.input.controller_name()
         ):
-            await self._run_button_mapping(force=False)
+            await self._run_button_mapping(force=force_mapping)
 
         audio_status = self.audio.detect()
         capabilities = self._build_capabilities(audio_status)
