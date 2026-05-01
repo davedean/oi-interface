@@ -22,17 +22,6 @@ export function downsampleMono(input, inputRate, outputRate = 16000) {
   return out;
 }
 
-export function interleavedToMono(channels, channelCount) {
-  if (channelCount === 1) return Float32Array.from(channels);
-  const frames = Math.floor(channels.length / channelCount);
-  const out = new Float32Array(frames);
-  for (let frame = 0; frame < frames; frame += 1) {
-    let sum = 0;
-    for (let channel = 0; channel < channelCount; channel += 1) sum += channels[frame * channelCount + channel];
-    out[frame] = sum / channelCount;
-  }
-  return out;
-}
 
 export function pcm16ToBytes(int16) {
   return new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
