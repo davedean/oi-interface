@@ -231,6 +231,7 @@ class HandheldApp:
         self._recording_sample_rate: int = 16000
         self._recording_channels: int = 1
         self._recording_start_time: float = 0.0
+        self._max_recording_seconds = max(1, _coerce_int(os.getenv("OI_MAX_RECORDING_SECONDS"), 30))
 
         # Outbound mic-stream state
         self._record_tx_stream_id: str | None = None
@@ -475,6 +476,7 @@ class HandheldApp:
 
             # Stream recorded audio chunks if actively recording
             await self._stream_recorded_audio()
+            await self._maybe_auto_stop_recording()
 
             # Sleep for ~33ms (30fps)
             await asyncio.sleep(0.033)
@@ -495,6 +497,19 @@ class HandheldApp:
             self._record_tx_seq += 1
             self._card.title = "Recording"
             self._card.body = f"Streaming audio… {len(chunk)} bytes"
+
+    async def _maybe_auto_stop_recording(self) -> None:
+        """Fail safe for missed release events while hold-to-record is active."""
+        if not self.audio.is_recording or self._ui_mode != UIMode.RECORDING:
+            return
+        if self._recording_start_time <= 0:
+            return
+        if (time.time() - self._recording_start_time) < self._max_recording_seconds:
+            return
+        logger.warning("auto-stopping voice recording after %.1fs", self._max_recording_seconds)
+        self._card.title = "Recording"
+        self._card.body = "Max voice duration reached; processing…"
+        await self.stop_recording()
 
     async def _maybe_send_state_report(self) -> None:
         if not self.datp or not self.datp.is_connected:
@@ -567,8 +582,12 @@ class HandheldApp:
 
         # Reset long-press guard when X is released without recording active.
         if ev.name == "x" and ev.action == "released":
-            # If long-press wasn't reached, discard any speculative pre-recording.
-            if not self._x_long_press_seen and self.audio.is_recording:
+            # Some controllers/backends can deliver only the normal release even
+            # after long_press. Treat release as stop once recording is committed.
+            if self._x_long_press_seen and self.audio.is_recording:
+                await self.stop_recording()
+            elif self.audio.is_recording:
+                # If long-press wasn't reached, discard speculative pre-recording.
                 self.audio.stop_recording()
                 self._x_pre_recording = False
             if not self.audio.is_recording and self._ui_mode in (UIMode.HOME, UIMode.READY):

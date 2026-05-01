@@ -248,6 +248,56 @@ async def test_stream_recorded_audio_sends_incremental_chunks(app: HandheldApp, 
 
 
 @pytest.mark.asyncio
+async def test_release_stops_recording_even_without_long_release_event(app: HandheldApp, monkeypatch) -> None:
+    app.datp = SimpleNamespace(
+        is_connected=True,
+        send_audio_chunk=AsyncMock(),
+        send_recording_finished=AsyncMock(),
+    )
+    app._online = True
+    app.audio.recording = True
+    app.audio.pending = b"tail"
+    app._ui_mode = UIMode.RECORDING
+    app._x_long_press_seen = True
+    app._recording_start_time = 100.0
+    app._record_tx_stream_id = "rec-release"
+    monkeypatch.setattr(app_mod.time, "time", lambda: 101.0)
+
+    await app._handle_input(SimpleNamespace(type="button", name="x", action="released", raw=0))
+
+    assert app.audio.is_recording is False
+    assert app._ui_mode == UIMode.WAITING
+    app.datp.send_audio_chunk.assert_awaited_once_with("rec-release", 0, b"tail", 16000)
+    app.datp.send_recording_finished.assert_awaited_once_with("rec-release", 1000)
+
+
+@pytest.mark.asyncio
+async def test_recording_auto_stops_after_max_duration(app: HandheldApp, monkeypatch) -> None:
+    app.datp = SimpleNamespace(
+        is_connected=True,
+        send_audio_chunk=AsyncMock(),
+        send_recording_finished=AsyncMock(),
+    )
+    app._online = True
+    app.audio.recording = True
+    app.audio.pending = b"final"
+    app._ui_mode = UIMode.RECORDING
+    app._recording_start_time = 100.0
+    app._record_tx_stream_id = "rec-timeout"
+    app._max_recording_seconds = 2
+    monkeypatch.setattr(app_mod.time, "time", lambda: 103.1)
+
+    await app._maybe_auto_stop_recording()
+
+    assert app.audio.is_recording is False
+    assert app._ui_mode == UIMode.WAITING
+    app.datp.send_audio_chunk.assert_awaited_once_with("rec-timeout", 0, b"final", 16000)
+    finished_args = app.datp.send_recording_finished.await_args.args
+    assert finished_args[0] == "rec-timeout"
+    assert 3099 <= finished_args[1] <= 3100
+
+
+@pytest.mark.asyncio
 async def test_start_and_stop_recording_flush_audio_chunks(app: HandheldApp, monkeypatch) -> None:
     app.datp = SimpleNamespace(
         is_connected=True,
