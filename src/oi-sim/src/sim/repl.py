@@ -31,7 +31,8 @@ Commands:
   battery N   - Send battery N%
   charging    - charging start|stop
   wifi N      - Send wifi RSSI N
-  connect     - Connect to gateway
+  gateway [url] - Show current gateway or switch to a new one
+  connect [url] - Connect to current gateway or switch live
   disconnect  - Disconnect
   state       - Show device state
   events      - Show event history
@@ -139,6 +140,8 @@ class OiSimREPL:
             "battery": self._cmd_battery,
             "charging": self._cmd_charging,
             "wifi": self._cmd_wifi,
+            "gateway": self._cmd_gateway,
+            "switch": self._cmd_gateway,
             "connect": self._cmd_connect,
             "disconnect": self._cmd_disconnect,
             "state": self._cmd_state,
@@ -325,14 +328,56 @@ class OiSimREPL:
         await self.sim.send_wifi_update(rssi)
         print(f"📤 sensor.wifi_update (rssi={rssi})")
 
-    async def _cmd_connect(self, args):
-        """Reconnect to gateway."""
+    async def _cmd_gateway(self, args):
+        """Show the current gateway or switch to a different one."""
         assert self.sim is not None
+        if not args:
+            print(f"Gateway: {self.sim.gateway}")
+            return
+
+        gateway = args[0].strip()
+        if not gateway:
+            print("Usage: gateway <ws://host:port/datp>")
+            return
+
         if self.sim.is_connected:
+            changed = await self.sim.switch_gateway(gateway)
+            if changed:
+                self._printed_command_count = 0
+                self.gateway = self.sim.gateway
+                print(f"✓ Switched gateway to {self.sim.gateway}")
+            else:
+                print(f"Gateway already set to {self.sim.gateway}")
+            return
+
+        self.sim.gateway = gateway
+        self.gateway = gateway
+        print(f"✓ Gateway set to {gateway}")
+
+    async def _cmd_connect(self, args):
+        """Connect to the current gateway or switch live to another one."""
+        assert self.sim is not None
+        gateway = args[0].strip() if args else ""
+
+        if self.sim.is_connected:
+            if gateway:
+                changed = await self.sim.switch_gateway(gateway)
+                if changed:
+                    self._printed_command_count = 0
+                    self.gateway = self.sim.gateway
+                    print(f"✓ Switched gateway to {self.sim.gateway}")
+                else:
+                    print(f"Already connected to {self.sim.gateway}")
+                return
             print("Already connected")
             return
+
+        if gateway:
+            self.sim.gateway = gateway
+            self.gateway = gateway
         await self.sim.connect()
-        print("✓ Reconnected")
+        self.gateway = self.sim.gateway
+        print(f"✓ Connected to {self.sim.gateway}")
 
     async def _cmd_disconnect(self, args):
         """Disconnect from gateway."""
@@ -349,6 +394,7 @@ class OiSimREPL:
         muted = self.sim.muted_until or "no"
         print(f"State: {state}")
         print(f"Display: {display} {label}")
+        print(f"Gateway: {self.sim.gateway}")
         print(f"Muted until: {muted}")
         print(f"Volume: {self.sim.volume}")
         print(f"Brightness: {self.sim.brightness}")

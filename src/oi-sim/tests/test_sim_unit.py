@@ -259,6 +259,97 @@ class TestOiSimUnitCoverage:
         assert device.received_messages == []
 
     @pytest.mark.asyncio
+    async def test_switch_gateway_updates_target_without_connecting_when_disconnected(self):
+        device = OiSim(gateway="ws://old.invalid/datp")
+
+        changed = await device.switch_gateway(" ws://new.invalid/datp ")
+
+        assert changed is True
+        assert device.gateway == "ws://new.invalid/datp"
+        assert device.is_connected is False
+
+    @pytest.mark.asyncio
+    async def test_switch_gateway_connected_resets_state_and_reconnects(self, monkeypatch):
+        initial_ws = FakeWebSocket()
+        reconnect_ws = FakeWebSocket(recv_messages=[{"type": "hello_ack", "payload": {"session_id": "sess-2"}}])
+        device = OiSim(gateway="ws://old.invalid/datp", reconnect_backoff_seconds=0)
+        device._ws = initial_ws
+        device._connected = True
+        device._session_id = "sess-1"
+        device._received_commands.append({"op": "display.show_status"})
+        device._received_messages.append({"type": "command"})
+        device._state_machine = StateMachine(State.THINKING)
+
+        async def fake_connect(gateway):
+            assert gateway == "ws://new.invalid/datp"
+            return reconnect_ws
+
+        listener_started = asyncio.Event()
+
+        async def fake_listen_loop():
+            listener_started.set()
+
+        monkeypatch.setattr("sim.sim.websockets.connect", fake_connect)
+        device._listen_loop = fake_listen_loop
+
+        changed = await device.switch_gateway("ws://new.invalid/datp")
+        await listener_started.wait()
+
+        assert changed is True
+        assert initial_ws.closed is True
+        assert device.gateway == "ws://new.invalid/datp"
+        assert device.is_connected is True
+        assert device._session_id == "sess-2"
+        assert device.state == State.READY
+        assert device.received_commands == []
+        assert device.received_messages == []
+
+    @pytest.mark.asyncio
+    async def test_switch_gateway_rolls_back_when_new_gateway_fails(self, monkeypatch):
+        old_ws = FakeWebSocket()
+        rollback_ws = FakeWebSocket(recv_messages=[{"type": "hello_ack", "payload": {"session_id": "sess-restored"}}])
+        device = OiSim(gateway="ws://old.invalid/datp", reconnect_backoff_seconds=0)
+        device._ws = old_ws
+        device._connected = True
+        device._session_id = "sess-1"
+
+        attempts: list[str] = []
+
+        async def fake_connect(gateway):
+            attempts.append(gateway)
+            if gateway == "ws://new.invalid/datp":
+                raise OSError("new gateway down")
+            if gateway == "ws://old.invalid/datp":
+                return rollback_ws
+            raise AssertionError(f"unexpected gateway {gateway}")
+
+        listener_started = asyncio.Event()
+
+        async def fake_listen_loop():
+            listener_started.set()
+
+        monkeypatch.setattr("sim.sim.websockets.connect", fake_connect)
+        device._listen_loop = fake_listen_loop
+
+        with pytest.raises(RuntimeError, match="rolled back to ws://old.invalid/datp"):
+            await device.switch_gateway("ws://new.invalid/datp")
+        await listener_started.wait()
+
+        assert attempts == ["ws://new.invalid/datp", "ws://old.invalid/datp"]
+        assert old_ws.closed is True
+        assert device.gateway == "ws://old.invalid/datp"
+        assert device.is_connected is True
+        assert device._session_id == "sess-restored"
+        assert device.state == State.READY
+
+    @pytest.mark.asyncio
+    async def test_switch_gateway_rejects_blank_target(self):
+        device = OiSim(gateway="ws://old.invalid/datp")
+
+        with pytest.raises(ValueError, match="Gateway URL cannot be empty"):
+            await device.switch_gateway("   ")
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("method_name", "args", "expected_payload"),
         [
@@ -353,6 +444,55 @@ class TestOiSimUnitCoverage:
         assert device.is_connected is True
         assert device._session_id == "sess-123"
         await device.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_connect_resets_stale_runtime_before_new_handshake(self, monkeypatch):
+        fake_ws = FakeWebSocket(recv_messages=[{"type": "hello_ack", "payload": {"session_id": "sess-456"}}])
+
+        async def fake_connect(_gateway):
+            return fake_ws
+
+        monkeypatch.setattr("sim.sim.websockets.connect", fake_connect)
+
+        listener_started = asyncio.Event()
+
+        async def fake_listen_loop():
+            listener_started.set()
+
+        device = OiSim(gateway="ws://example.invalid/datp")
+        device._session_id = "stale-session"
+        device._received_commands.append({"op": "display.show_status"})
+        device._received_messages.append({"type": "command"})
+        device._state_machine = StateMachine(State.THINKING)
+        device._listen_loop = fake_listen_loop
+
+        await device.connect()
+        await listener_started.wait()
+
+        assert device.state == State.READY
+        assert device.received_commands == []
+        assert device.received_messages == []
+        assert device._session_id == "sess-456"
+        await device.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_connect_uses_normalized_gateway_string(self, monkeypatch):
+        fake_ws = FakeWebSocket(recv_messages=[{"type": "hello_ack", "payload": {"session_id": "sess-123"}}])
+        gateways: list[str] = []
+
+        async def fake_connect(gateway):
+            gateways.append(gateway)
+            return fake_ws
+
+        monkeypatch.setattr("sim.sim.websockets.connect", fake_connect)
+
+        device = OiSim(gateway=" ws://example.invalid/datp ")
+        device._listen_loop = lambda: asyncio.sleep(0)
+
+        await device.connect()
+        await device.disconnect()
+
+        assert gateways == ["ws://example.invalid/datp"]
 
     def test_display_properties_proxy_state_machine_fields(self):
         device = OiSim()

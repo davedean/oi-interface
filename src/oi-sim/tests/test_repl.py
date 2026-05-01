@@ -11,6 +11,7 @@ from sim.repl import OiSimREPL
 class FakeSim:
     def __init__(self) -> None:
         self.is_connected = True
+        self.gateway = "ws://fake"
         self.received_commands: list[dict] = []
         self.received_messages: list[dict] = []
         self.state = SimpleNamespace(value="READY")
@@ -21,6 +22,7 @@ class FakeSim:
         self.brightness = 80
         self.calls: list[tuple] = []
         self.fail_connect = False
+        self.switch_gateway_result = True
 
     async def connect(self):
         self.calls.append(("connect",))
@@ -31,6 +33,12 @@ class FakeSim:
     async def disconnect(self):
         self.calls.append(("disconnect",))
         self.is_connected = False
+
+    async def switch_gateway(self, gateway):
+        self.calls.append(("switch_gateway", gateway))
+        if self.switch_gateway_result:
+            self.gateway = gateway
+        return self.switch_gateway_result
 
     async def press_long_hold(self):
         self.calls.append(("hold",))
@@ -199,8 +207,65 @@ async def test_cmd_connect_handles_already_connected_and_reconnects(repl, fake_s
     out2 = capsys.readouterr().out
 
     assert "Already connected" in out1
-    assert "✓ Reconnected" in out2
+    assert "✓ Connected to ws://fake" in out2
     assert fake_sim.calls[-1] == ("connect",)
+
+
+@pytest.mark.asyncio
+async def test_cmd_connect_with_gateway_switches_when_connected(repl, fake_sim, capsys):
+    await repl._cmd_connect(["ws://backup/datp"])
+    out = capsys.readouterr().out
+
+    assert fake_sim.calls[-1] == ("switch_gateway", "ws://backup/datp")
+    assert fake_sim.gateway == "ws://backup/datp"
+    assert repl.gateway == "ws://backup/datp"
+    assert "✓ Switched gateway to ws://backup/datp" in out
+
+
+@pytest.mark.asyncio
+async def test_cmd_connect_with_gateway_updates_target_before_connecting(repl, fake_sim, capsys):
+    fake_sim.is_connected = False
+
+    await repl._cmd_connect(["ws://backup/datp"])
+    out = capsys.readouterr().out
+
+    assert fake_sim.gateway == "ws://backup/datp"
+    assert repl.gateway == "ws://backup/datp"
+    assert fake_sim.calls[-1] == ("connect",)
+    assert "✓ Connected to ws://backup/datp" in out
+
+
+@pytest.mark.asyncio
+async def test_cmd_gateway_shows_sets_and_switches_gateway(repl, fake_sim, capsys):
+    await repl._cmd_gateway([])
+    show_out = capsys.readouterr().out
+
+    fake_sim.is_connected = False
+    await repl._cmd_gateway(["ws://offline/datp"])
+    set_out = capsys.readouterr().out
+
+    fake_sim.is_connected = True
+    await repl._cmd_gateway(["ws://live/datp"])
+    switch_out = capsys.readouterr().out
+
+    assert "Gateway: ws://fake" in show_out
+    assert fake_sim.gateway == "ws://live/datp"
+    assert repl.gateway == "ws://live/datp"
+    assert ("switch_gateway", "ws://live/datp") in fake_sim.calls
+    assert "✓ Gateway set to ws://offline/datp" in set_out
+    assert "✓ Switched gateway to ws://live/datp" in switch_out
+
+
+@pytest.mark.asyncio
+async def test_cmd_gateway_same_gateway_does_not_reset_printed_count(repl, fake_sim, capsys):
+    fake_sim.switch_gateway_result = False
+    repl._printed_command_count = 3
+
+    await repl._cmd_gateway(["ws://fake"])
+    out = capsys.readouterr().out
+
+    assert repl._printed_command_count == 3
+    assert "Gateway already set to ws://fake" in out
 
 
 @pytest.mark.asyncio
@@ -209,6 +274,7 @@ async def test_cmd_state_prints_all_fields(repl, capsys):
     out = capsys.readouterr().out
     assert "State: READY" in out
     assert "Display: thinking Processing" in out
+    assert "Gateway: ws://fake" in out
     assert "Muted until: no" in out
     assert "Volume: 50" in out
     assert "Brightness: 80" in out
@@ -243,6 +309,7 @@ async def test_cmd_help_and_quit(repl, capsys):
 
     assert "Commands:" in help_out
     assert "text <msg>  - Send text prompt to agent" in help_out
+    assert "gateway [url] - Show current gateway or switch to a new one" in help_out
     assert repl.running is False
 
 

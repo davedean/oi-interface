@@ -14,7 +14,7 @@ python -m pip install -e ".[dev]"
 oi-sim --gateway ws://localhost:8787/datp --device-id oi-sim-repl-001
 ```
 
-In the REPL, type `help` for available commands (`hold`, `release`, `text`, `tap`, etc).
+In the REPL, type `help` for available commands (`hold`, `release`, `text`, `tap`, `gateway`, etc).
 
 For scripted usage from Python, create an `OiSim`, connect it, then call helpers such as
 `send_text_prompt()`, `press_long_hold()`, `release()`, or `replay_fixture()` from
@@ -51,4 +51,4 @@ PYTHONPATH=src python -m gateway_app
 cd src/oi-sim
 oi-sim --gateway ws://localhost:8787/datp --device-id oi-sim-smoke
 ```
-Then run `text hello`, `hold`, `release`, and `events` in the REPL to verify the round-trip.
+Then run `text hello`, `hold`, `release`, `gateway ws://other-host:8787/datp`, and `events` in the REPL to verify the round-trip.

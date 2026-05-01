@@ -9,8 +9,20 @@ from pathlib import Path
 
 import pytest
 
+from datp.server import DATPServer
 from sim.sim import OiSim
 from sim.state import State
+
+
+async def _start_datp_server() -> tuple[DATPServer, asyncio.Task[None]]:
+    server = DATPServer(host="localhost", port=0)
+    task = asyncio.create_task(server.start())
+    deadline = asyncio.get_running_loop().time() + 1.0
+    while server.port == 0:
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError("DATP test server did not bind a port in time")
+        await asyncio.sleep(0.01)
+    return server, task
 
 
 @pytest.mark.asyncio
@@ -278,6 +290,53 @@ async def test_reconnect_resets_session_and_local_buffers(datp_server):
         device.assert_trace_contains("reconnect_wait", direction="lifecycle")
     finally:
         await device.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_switch_gateway_moves_live_connection_to_new_server(datp_server):
+    second_server, second_task = await _start_datp_server()
+    device = OiSim(gateway=f"ws://localhost:{datp_server.port}/datp", device_id="oi-sim-switch")
+    await device.connect()
+
+    try:
+        first_session = device._session_id
+        assert "oi-sim-switch" in datp_server.device_registry
+        assert "oi-sim-switch" not in second_server.device_registry
+
+        cmd = {
+            "v": "datp",
+            "type": "command",
+            "id": "cmd_before_switch",
+            "device_id": "oi-sim-switch",
+            "ts": "2026-04-27T04:40:00.000Z",
+            "payload": {
+                "op": "display.show_status",
+                "args": {"state": "thinking", "label": "Before switch"},
+            },
+        }
+        await datp_server.send_to_device("oi-sim-switch", cmd)
+        await asyncio.sleep(0.2)
+        assert len(device.received_commands) == 1
+
+        changed = await device.switch_gateway(f"ws://localhost:{second_server.port}/datp")
+        await asyncio.sleep(0.2)
+
+        assert changed is True
+        assert device.gateway == f"ws://localhost:{second_server.port}/datp"
+        assert device.is_connected is True
+        assert device._session_id is not None
+        assert device._session_id != first_session
+        assert device.state == State.READY
+        assert device.received_commands == []
+        assert device.received_messages == []
+        assert "oi-sim-switch" not in datp_server.device_registry
+        assert "oi-sim-switch" in second_server.device_registry
+        device.assert_trace_contains("gateway_switch_complete", direction="lifecycle")
+    finally:
+        await device.disconnect()
+        await second_server.stop()
+        await second_task
+        await asyncio.sleep(0.15)
 
 
 @pytest.mark.asyncio

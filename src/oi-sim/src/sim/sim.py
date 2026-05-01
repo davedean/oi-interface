@@ -75,6 +75,13 @@ def _new_id(prefix: str = "msg") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def _normalize_gateway_url(gateway: str) -> str:
+    normalized = str(gateway).strip()
+    if not normalized:
+        raise ValueError("Gateway URL cannot be empty")
+    return normalized
+
+
 def _trace_event_payload(event: TraceEvent) -> dict[str, Any]:
     """Convert a trace event to the JSONL payload written to disk."""
     return {
@@ -119,7 +126,7 @@ class OiSim(OiSimDeviceAPI):
         trace_path: str | Path | None = None,
         reconnect_backoff_seconds: float = 0.1,
     ) -> None:
-        self.gateway = gateway
+        self.gateway = _normalize_gateway_url(gateway)
         self.device_id = device_id
         self.device_type = device_type
         self.capabilities = capabilities or copy.deepcopy(DEFAULT_CAPABILITIES)
@@ -207,6 +214,10 @@ class OiSim(OiSimDeviceAPI):
         if self._connected:
             raise RuntimeError("Already connected")
 
+        if self._session_id is not None or self._received_commands or self._received_messages or self.state != State.READY:
+            self._reset_runtime_for_new_connection()
+
+        self.gateway = _normalize_gateway_url(self.gateway)
         self._ws = await websockets.connect(self.gateway)
         self._connected = True
         try:
@@ -246,8 +257,7 @@ class OiSim(OiSimDeviceAPI):
     async def reconnect(self) -> None:
         """Disconnect, reset local session state, wait briefly, then reconnect."""
         await self.disconnect()
-        self._reset_for_reconnect()
-        self._state_machine = StateMachine(State.READY)
+        self._reset_runtime_for_new_connection()
         self._record_trace(
             "lifecycle",
             "reconnect_wait",
@@ -255,6 +265,89 @@ class OiSim(OiSimDeviceAPI):
         )
         await asyncio.sleep(self.reconnect_backoff_seconds)
         await self.connect()
+
+    async def switch_gateway(self, gateway: str) -> bool:
+        """Switch to a different gateway, preserving availability via rollback on failure."""
+        target_gateway = _normalize_gateway_url(gateway)
+        current_gateway = self.gateway
+        if target_gateway == current_gateway:
+            return False
+
+        if not self.is_connected:
+            self.gateway = target_gateway
+            self._record_trace(
+                "lifecycle",
+                "gateway_switch_staged",
+                {
+                    "device_id": self.device_id,
+                    "from_gateway": current_gateway,
+                    "to_gateway": target_gateway,
+                },
+            )
+            return True
+
+        self._record_trace(
+            "lifecycle",
+            "gateway_switch_begin",
+            {
+                "device_id": self.device_id,
+                "from_gateway": current_gateway,
+                "to_gateway": target_gateway,
+            },
+        )
+        await self.disconnect()
+        self._reset_runtime_for_new_connection()
+        self.gateway = target_gateway
+
+        try:
+            await self.connect()
+        except Exception as exc:
+            self._record_trace(
+                "lifecycle",
+                "gateway_switch_failed",
+                {
+                    "device_id": self.device_id,
+                    "from_gateway": current_gateway,
+                    "to_gateway": target_gateway,
+                    "error": str(exc),
+                },
+            )
+            self._reset_runtime_for_new_connection()
+            self.gateway = current_gateway
+            try:
+                await self.connect()
+            except Exception:
+                self._record_trace(
+                    "lifecycle",
+                    "gateway_switch_rollback_failed",
+                    {
+                        "device_id": self.device_id,
+                        "gateway": current_gateway,
+                    },
+                )
+                raise
+            self._record_trace(
+                "lifecycle",
+                "gateway_switch_rollback_complete",
+                {
+                    "device_id": self.device_id,
+                    "gateway": current_gateway,
+                },
+            )
+            raise RuntimeError(
+                f"Failed to switch gateway to {target_gateway}; rolled back to {current_gateway}"
+            ) from exc
+
+        self._record_trace(
+            "lifecycle",
+            "gateway_switch_complete",
+            {
+                "device_id": self.device_id,
+                "from_gateway": current_gateway,
+                "to_gateway": target_gateway,
+            },
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Internal listener
@@ -354,6 +447,11 @@ class OiSim(OiSimDeviceAPI):
         self._pending_acks.clear()
         self._received_commands.clear()
         self._received_messages.clear()
+
+    def _reset_runtime_for_new_connection(self) -> None:
+        """Reset local runtime state before reconnecting to the same or a new gateway."""
+        self._reset_for_reconnect()
+        self._state_machine = StateMachine(State.READY)
 
     def _build_hello_message(self) -> dict[str, Any]:
         """Build the initial DATP hello handshake payload."""
