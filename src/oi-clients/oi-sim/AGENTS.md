@@ -2,7 +2,7 @@
 
 ## Scope
 
-Applies to everything under `src/oi-sim/`.
+Applies to everything under `src/oi-clients/oi-sim/`.
 
 ## Purpose
 
@@ -11,7 +11,7 @@ Keep `oi-sim` as a simple, reliable virtual DATP device for local development an
 ## Usage (rough)
 
 ```bash
-cd src/oi-sim
+cd src/oi-clients/oi-sim
 python -m pip install -e ".[dev]"
 oi-sim --gateway ws://localhost:8787/datp --device-id oi-sim-repl-001
 ```
@@ -29,7 +29,7 @@ Use `help` in the REPL to inspect supported simulated events.
 ## Testing (rough)
 
 ```bash
-cd src/oi-sim
+cd src/oi-clients/oi-sim
 pytest
 ```
 

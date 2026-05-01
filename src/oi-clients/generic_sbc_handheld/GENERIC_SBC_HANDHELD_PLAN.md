@@ -51,25 +51,25 @@ Split the design into:
 ## 4. Reuse strategy: start from `oi-sim`
 
 Plain English: we do **not** invent DATP from scratch.
-The nearest working implementation is `src/oi-sim/`, and it is our first code donor.
+The nearest working implementation is `src/oi-clients/oi-sim/`, and it is our first code donor.
 
 ### Directly reusable
 
-#### `src/oi-sim/src/sim/sim.py`
+#### `src/oi-clients/oi-sim/src/sim/sim.py`
 - DATP WebSocket lifecycle
 - `hello` construction and `hello_ack` handling
 - capability advertisement
 - event sending patterns
 - command receive + ack
 
-#### `src/oi-sim/src/sim/state.py`
+#### `src/oi-clients/oi-sim/src/sim/state.py`
 - canonical device state machine
 - valid transitions (`READY → THINKING → RESPONSE_CACHED` etc.)
 - command-driven state updates
 
 ### Adapted, not copied blindly
 
-#### `src/oi-sim/src/sim/repl.py`
+#### `src/oi-clients/oi-sim/src/sim/repl.py`
 Replaced with:
 - SDL2 gamepad input adapter
 - SDL2 full-screen renderer

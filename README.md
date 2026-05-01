@@ -62,10 +62,10 @@ BIG_TIDY_UP_PLAN.md          ← broader cleanup plan
 PI_GATEWAY_INTEGRATION_PLAN.md ← Pi gateway integration notes
 src/                         ← v2 implementation
   oi-gateway/                ← Python gateway: DATP, registry, STT/TTS, resource tree API
-  oi-sim/                    ← virtual DATP device for dev and CI
   oi-cli/                    ← CLI wrapper over the gateway API
   oi-dashboard/              ← monitoring and debug dashboard
   oi-clients/                ← device client implementations and planning
+    oi-sim/                  ← virtual DATP device for dev and CI
 oi-project-docs/             ← public specs and architecture docs
 ```
 
@@ -95,7 +95,7 @@ oi-project-docs/             ← public specs and architecture docs
 # LAN URL: http://<this-machine-ip>:8789
 
 # Virtual device
-cd src/oi-sim
+cd src/oi-clients/oi-sim
 python3 -m oi_sim
 
 # CLI

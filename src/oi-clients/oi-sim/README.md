@@ -9,7 +9,7 @@ Virtual DATP device simulator for local Oi development and testing.
 ## Usage (rough)
 
 ```bash
-cd src/oi-sim
+cd src/oi-clients/oi-sim
 python -m pip install -e ".[dev]"
 oi-sim --gateway ws://localhost:8787/datp --device-id oi-sim-repl-001
 ```
@@ -37,7 +37,7 @@ Typical first-time local setup:
 ## Testing (rough)
 
 ```bash
-cd src/oi-sim
+cd src/oi-clients/oi-sim
 pytest
 ```
 
@@ -48,7 +48,7 @@ cd src/oi-gateway
 PYTHONPATH=src python -m gateway_app
 
 # terminal 2
-cd src/oi-sim
+cd src/oi-clients/oi-sim
 oi-sim --gateway ws://localhost:8787/datp --device-id oi-sim-smoke
 ```
 Then run `text hello`, `hold`, `release`, `gateway ws://other-host:8787/datp`, and `events` in the REPL to verify the round-trip.

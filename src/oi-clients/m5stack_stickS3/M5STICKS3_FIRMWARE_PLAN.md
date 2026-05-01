@@ -919,7 +919,7 @@ After initial implementation:
 - Hardware ref: `src/oi-clients/m5stack_stickS3/HARDWARE.md`
 - Legacy firmware: `src/oi-clients/m5stack_stickS3/lib/` (for display/audio drivers)
 - oi-gateway: `src/oi-gateway/` (DATP server implementation)
-- oi-sim: `src/oi-sim/` (virtual DATP device for testing)
+- oi-sim: `src/oi-clients/oi-sim/` (virtual DATP device for testing)
 
 ---
 

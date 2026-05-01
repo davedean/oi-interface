@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent
 SUITES = [
     ROOT / "src" / "oi-cli",
     ROOT / "src" / "oi-gateway",
-    ROOT / "src" / "oi-sim",
+    ROOT / "src" / "oi-clients" / "oi-sim",
     ROOT / "src" / "oi-dashboard",
     ROOT / "src" / "oi-clients",
 ]

@@ -23,7 +23,7 @@ import pytest
 import sys
 gateway_src = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(gateway_src))
-sim_src = Path(__file__).parent.parent.parent / "oi-sim" / "src"
+sim_src = Path(__file__).parent.parent.parent / "oi-clients" / "oi-sim" / "src"
 sys.path.insert(0, str(sim_src))
 
 from datp.server import DATPServer

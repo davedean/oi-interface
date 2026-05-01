@@ -1,7 +1,7 @@
 """Sketch of a generic Linux SBC handheld runtime for Oi.
 
 This is illustrative only and shows the intended architecture.
-The real implementation should import/adapt code from `src/oi-sim/` rather
+The real implementation should import/adapt code from `src/oi-clients/oi-sim/` rather
 than writing DATP from scratch.
 
 Design note:

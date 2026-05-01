@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """DATP WebSocket client for Oi handheld devices.
 
-Adapted from OiSim (src/oi-sim/src/sim/sim.py).
+Adapted from OiSim (src/oi-clients/oi-sim/src/sim/sim.py).
 """
 
 from __future__ import annotations

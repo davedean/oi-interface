@@ -9,7 +9,7 @@ import pytest
 import sys
 
 gateway_src = Path(__file__).parent.parent / "src"
-sim_src = Path(__file__).parent.parent.parent / "oi-sim" / "src"
+sim_src = Path(__file__).parent.parent.parent / "oi-clients" / "oi-sim" / "src"
 sys.path.insert(0, str(gateway_src))
 sys.path.insert(0, str(sim_src))
 
