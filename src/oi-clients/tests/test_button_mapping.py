@@ -96,9 +96,19 @@ def test_mapping_signature_and_collision_detection() -> None:
 
     assert _mapping_signature(mapping["a"]) == ("button", 4, 0)
     assert _mapping_signature(mapping["up"]) == ("hat", 0, 1)
-    assert _find_collision(mapping, "b", {"type": "button", "value": 4}) == "a"
-    assert _find_collision(mapping, "right", {"type": "hat", "hat": 0, "value": 1}) == "up"
-    assert _find_collision(mapping, "a", {"type": "button", "value": 4}) is None
+    assert _find_collision(mapping, {"a", "up"}, "b", {"type": "button", "value": 4}) == "a"
+    assert _find_collision(mapping, {"a", "up"}, "right", {"type": "hat", "hat": 0, "value": 1}) == "up"
+    assert _find_collision(mapping, {"a", "up"}, "a", {"type": "button", "value": 4}) is None
+
+
+def test_collision_detection_ignores_seeded_preexisting_assignments() -> None:
+    mapping = {
+        "l2": {"type": "button", "value": 6},
+        "start": {"type": "button", "value": 7},
+    }
+
+    assert _find_collision(mapping, {"start"}, "start", {"type": "button", "value": 6}) is None
+    assert _find_collision(mapping, {"start"}, "a", {"type": "button", "value": 7}) == "start"
 
 
 def test_advance_release_guard_waits_for_matching_release() -> None:

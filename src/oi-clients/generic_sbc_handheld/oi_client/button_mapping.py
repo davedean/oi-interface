@@ -114,6 +114,7 @@ async def _wait_for_buttons_released(renderer, input_device, held_buttons: set[i
 
 async def run_button_mapping_wizard(renderer, input_device, seed_map: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]] | None:
     mapping = {k: dict(v) for k, v in (seed_map or {}).items()}
+    session_mapped: set[str] = set()
     step_index = 0
     step_started = time.time()
     held_buttons: set[int] = set()
@@ -165,6 +166,7 @@ async def run_button_mapping_wizard(renderer, input_device, seed_map: dict[str, 
             restart_hold_started, restart_now = _update_restart_hold(held_buttons, restart_hold_started, event, event_now)
             if restart_now:
                 mapping = {}
+                session_mapped.clear()
                 step_index = 0
                 step_started = event_now
                 held_buttons.clear()
@@ -192,7 +194,7 @@ async def run_button_mapping_wizard(renderer, input_device, seed_map: dict[str, 
             last_press_signature = signature
             last_press_at = event_now
 
-            collision = _find_collision(mapping, step.logical_name, resolved)
+            collision = _find_collision(mapping, session_mapped, step.logical_name, resolved)
             if collision is not None:
                 status_message = f"Already used by {collision.upper()}; try another control."
                 status_until = event_now + 1.8
@@ -200,6 +202,7 @@ async def run_button_mapping_wizard(renderer, input_device, seed_map: dict[str, 
                 continue
 
             mapping[step.logical_name] = resolved
+            session_mapped.add(step.logical_name)
             release_guard = signature
             step_index += 1
             step_started = event_now
@@ -264,12 +267,13 @@ def _mapping_signature(mapping: dict[str, int]) -> tuple[str, int, int]:
 
 def _find_collision(
     mapping: dict[str, dict[str, Any]],
+    session_mapped: set[str],
     logical_name: str,
     candidate: dict[str, int],
 ) -> str | None:
     candidate_sig = _mapping_signature(candidate)
     for other_name, other_mapping in mapping.items():
-        if other_name == logical_name:
+        if other_name == logical_name or other_name not in session_mapped:
             continue
         if _mapping_signature(other_mapping) == candidate_sig:
             return other_name
