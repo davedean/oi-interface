@@ -141,6 +141,68 @@ class TestTranscriptEndpoint:
         assert data["transcripts"][0]["response"] == "Hi!"
 
 
+class TestConversationEndpoints:
+    async def _add_device(self, gateway_api, device_id):
+        gateway_api._datp.device_registry[device_id] = {
+            "device_id": device_id,
+            "session_id": f"session-{device_id}",
+            "capabilities": {},
+            "conversation": {
+                "backend_id": "pi",
+                "agent_id": "main",
+                "session_key": f"oi:device:{device_id}",
+            },
+        }
+        gateway_api._datp.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+        gateway_api._datp.default_backend_id = "pi"
+        gateway_api._datp.default_agent = {"id": "main", "name": "Main"}
+        gateway_api._datp.available_agents = [gateway_api._datp.default_agent, {"id": "build", "name": "Build"}]
+
+    async def test_get_device_conversation(self, gateway_api):
+        import aiohttp
+        await self._add_device(gateway_api, "dev-conversation")
+
+        url = f"http://{gateway_api._host}:{gateway_api._port}/api/devices/dev-conversation/conversation"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["conversation"] == {
+            "backend_id": "pi",
+            "agent_id": "main",
+            "session_key": "oi:device:dev-conversation",
+        }
+        assert data["available_backends"][1]["id"] == "codex"
+
+    async def test_post_device_conversation_validates_and_updates(self, gateway_api):
+        import aiohttp
+        await self._add_device(gateway_api, "dev-conversation")
+
+        url = f"http://{gateway_api._host}:{gateway_api._port}/api/devices/dev-conversation/conversation"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json={"backend_id": "codex", "agent_id": "build", "session_key": "oi:session:new"}) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+            async with session.post(url, json=[]) as resp:
+                assert resp.status == 400
+            async with session.post(url, json={"conversation": []}) as resp:
+                assert resp.status == 400
+                nested_err = await resp.json()
+            async with session.post(url, json={"backend_id": "missing"}) as resp:
+                assert resp.status == 400
+                err = await resp.json()
+
+        assert data["conversation"] == {
+            "backend_id": "codex",
+            "agent_id": "build",
+            "session_key": "oi:session:new",
+        }
+        assert gateway_api._datp.get_device_conversation("dev-conversation") == data["conversation"]
+        assert "conversation must be a JSON object" in nested_err["error"]
+        assert "backend_id" in err["error"]
+
+
 class TestCommandEndpoints:
     async def _add_device(self, gateway_api, device_id):
         gateway_api._datp.device_registry[device_id] = {

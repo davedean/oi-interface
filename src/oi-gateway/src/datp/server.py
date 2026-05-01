@@ -30,6 +30,10 @@ if not logger.handlers and not logging.getLogger().handlers:
 DeviceEntry = dict[str, Any]
 
 
+class ConversationValidationError(ValueError):
+    """Raised when a requested device conversation is invalid."""
+
+
 class DATPServer:
     """asyncio WebSocket server for the Device Agent Transport Protocol.
 
@@ -61,6 +65,7 @@ class DATPServer:
         self._stopping = False
         self._server: websockets.WebSocketServer | None = None
         self.device_registry: dict[str, DeviceEntry] = {}
+        self._device_locks: dict[str, asyncio.Lock] = {}
         self.available_backends = available_backends or []
         self.default_backend_id = default_backend_id or (self.available_backends[0]["id"] if self.available_backends else None)
         self.default_agent = default_agent
@@ -155,6 +160,22 @@ class DATPServer:
         device_id = msg_dict.get("device_id", "")
         logger.debug("dispatch: type=%r device=%r id=%r", msg_type, device_id, msg_dict.get("id"))
 
+        if msg_type != "hello" and not self._connection_owns_device(ws, device_id):
+            code = "UNKNOWN_DEVICE" if device_id not in self.device_registry else "DEVICE_ID_MISMATCH"
+            message = (
+                "Device must complete hello before sending messages"
+                if code == "UNKNOWN_DEVICE"
+                else "Message device_id does not match the connected device"
+            )
+            error = build_error(
+                device_id=device_id,
+                code=code,
+                message=message,
+                related_id=msg_dict.get("id"),
+            )
+            await ws.send(json.dumps(error))
+            return device_id or None
+
         if msg_type == "hello":
             await self._handle_hello(ws, msg_dict)
         elif msg_type == "event":
@@ -203,20 +224,88 @@ class DATPServer:
         conversation = entry.get("conversation")
         return conversation if isinstance(conversation, dict) else {}
 
+    def _device_lock(self, device_id: str) -> asyncio.Lock:
+        lock = self._device_locks.get(device_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._device_locks[device_id] = lock
+        return lock
+
+    def _connection_owns_device(self, ws, device_id: str) -> bool:
+        entry = self.device_registry.get(device_id)
+        return bool(entry and entry.get("ws") is ws)
+
+    def _validate_conversation_request(
+        self,
+        requested_conversation: dict[str, Any],
+        *,
+        strict_selection: bool,
+    ) -> None:
+        if not isinstance(requested_conversation, dict):
+            raise ConversationValidationError("conversation must be an object")
+
+        backend_id = requested_conversation.get("backend_id")
+        if backend_id is not None and not isinstance(backend_id, str):
+            raise ConversationValidationError("backend_id must be a string")
+
+        agent_id = requested_conversation.get("agent_id")
+        if agent_id is not None and not isinstance(agent_id, str):
+            raise ConversationValidationError("agent_id must be a string")
+
+        session_key = requested_conversation.get("session_key")
+        if session_key is not None and not isinstance(session_key, str):
+            raise ConversationValidationError("session_key must be a string")
+
+        if strict_selection:
+            available_backend_ids = {
+                str(item.get("id"))
+                for item in self.available_backends
+                if isinstance(item, dict) and item.get("id")
+            }
+            available_agent_ids = {
+                str(agent.get("id"))
+                for agent in self.available_agents
+                if isinstance(agent, dict) and agent.get("id")
+            }
+            if backend_id is not None and backend_id not in available_backend_ids:
+                raise ConversationValidationError(f"unknown backend_id: {backend_id}")
+            if agent_id is not None and agent_id not in available_agent_ids:
+                raise ConversationValidationError(f"unknown agent_id: {agent_id}")
+
     async def _maybe_handle_conversation_update(self, ws, msg: dict[str, Any]) -> bool:
         payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
         if payload.get("event") != "conversation.update":
             return False
 
         device_id = msg.get("device_id", "")
+        if "conversation" in payload and not isinstance(payload.get("conversation"), dict):
+            error = build_error(
+                device_id=device_id,
+                code="INVALID_CONVERSATION",
+                message="conversation must be an object",
+                related_id=msg.get("id"),
+            )
+            await ws.send(json.dumps(error))
+            return True
+
         requested_conversation = payload.get("conversation") if isinstance(payload.get("conversation"), dict) else {}
-        updated = await self.update_device_conversation(
-            device_id,
-            backend_id=requested_conversation.get("backend_id"),
-            agent_id=requested_conversation.get("agent_id"),
-            session_key=requested_conversation.get("session_key"),
-            notify_device=True,
-        )
+        try:
+            updated = await self.update_device_conversation(
+                device_id,
+                backend_id=requested_conversation.get("backend_id"),
+                agent_id=requested_conversation.get("agent_id"),
+                session_key=requested_conversation.get("session_key"),
+                notify_device=True,
+            )
+        except ConversationValidationError as exc:
+            error = build_error(
+                device_id=device_id,
+                code="INVALID_CONVERSATION",
+                message=str(exc),
+                related_id=msg.get("id"),
+            )
+            await ws.send(json.dumps(error))
+            return True
         if updated is None:
             error = build_error(
                 device_id=device_id,
@@ -236,6 +325,7 @@ class DATPServer:
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         requested = requested_conversation or {}
         current = current_conversation or {}
+        self._validate_conversation_request(requested, strict_selection=False)
 
         available_backend_ids = {
             str(item.get("id"))
@@ -285,24 +375,106 @@ class DATPServer:
         session_key: str | None = None,
         notify_device: bool = False,
     ) -> dict[str, Any] | None:
-        entry = self.device_registry.get(device_id)
-        if entry is None:
-            return None
+        async with self._device_lock(device_id):
+            entry = self.device_registry.get(device_id)
+            if entry is None:
+                return None
 
-        conversation, selected_agent = self._resolve_conversation(
-            device_id,
-            {
+            requested = {
                 "backend_id": backend_id,
                 "agent_id": agent_id,
                 "session_key": session_key,
-            },
-            current_conversation=self.get_device_conversation(device_id),
-        )
-        entry["conversation"] = conversation
+            }
+            self._validate_conversation_request(requested, strict_selection=True)
+            conversation, selected_agent = self._resolve_conversation(
+                device_id,
+                requested,
+                current_conversation=self.get_device_conversation(device_id),
+            )
+            entry["conversation"] = conversation
 
-        if notify_device:
+            if notify_device and entry.get("ws") is not None:
+                ack = build_hello_ack(
+                    session_id=entry.get("session_id", f"sess_{secrets.token_hex(8)}"),
+                    device_id=device_id,
+                    default_agent=self.default_agent,
+                    available_agents=self.available_agents,
+                    available_backends=self.available_backends,
+                    selected_backend=conversation.get("backend_id"),
+                    selected_agent=selected_agent,
+                    selected_session_key=conversation.get("session_key"),
+                )
+                try:
+                    await entry["ws"].send(json.dumps(ack))
+                except websockets.ConnectionClosed:
+                    logger.warning("conversation update ack dropped because device %r disconnected", device_id)
+
+            return conversation
+
+    async def _handle_hello(self, ws, msg: dict[str, Any]) -> None:
+        """Process a hello handshake, register device, and send hello_ack."""
+        device_id = msg["device_id"]
+        payload: dict[str, Any] = msg.get("payload", {})
+        if "conversation" in payload and not isinstance(payload.get("conversation"), dict):
+            error = build_error(
+                device_id=device_id,
+                code="INVALID_CONVERSATION",
+                message="conversation must be an object",
+                related_id=msg.get("id"),
+            )
+            await ws.send(json.dumps(error))
+            return
+
+        requested_conversation = payload.get("conversation") if isinstance(payload.get("conversation"), dict) else {}
+        session_id = f"sess_{secrets.token_hex(8)}"
+
+        async with self._device_lock(device_id):
+            try:
+                self._validate_conversation_request(requested_conversation, strict_selection=True)
+                conversation, selected_agent = self._resolve_conversation(device_id, requested_conversation)
+            except ConversationValidationError as exc:
+                error = build_error(
+                    device_id=device_id,
+                    code="INVALID_CONVERSATION",
+                    message=str(exc),
+                    related_id=msg.get("id"),
+                )
+                await ws.send(json.dumps(error))
+                return
+
+            # Mark this device online BEFORE closing the old WebSocket.
+            # This prevents the old connection's _handle_connection finally block
+            # from incorrectly calling device_disconnected and marking the new session offline.
+            if self.registry is not None:
+                self.registry._mark_online(device_id)
+
+            # Disconnect any prior connection for this device_id before replacing.
+            # This prevents a stale WebSocket from receiving commands after a reconnect.
+            if device_id in self.device_registry:
+                old_entry = self.device_registry[device_id]
+                try:
+                    await old_entry["ws"].close()
+                except websockets.ConnectionClosed:
+                    pass
+
+            # TODO (Step 3+): validate nonce for replay-attack prevention.
+            #   Track recent nonces in a bounded set; reject a hello whose nonce
+            #   matches a recently seen value.
+            # TODO (Step 3+): resume_token support.
+            #   If resume_token is provided, look up the previous session and
+            #   restore state rather than starting fresh.
+            entry: DeviceEntry = {
+                "ws": ws,
+                "session_id": session_id,
+                "capabilities": payload.get("capabilities", {}),
+                "resume_token": payload.get("resume_token"),
+                "nonce": payload.get("nonce"),
+                "conversation": conversation,
+            }
+            self.device_registry[device_id] = entry
+
             ack = build_hello_ack(
-                session_id=entry.get("session_id", f"sess_{secrets.token_hex(8)}"),
+                session_id=session_id,
                 device_id=device_id,
                 default_agent=self.default_agent,
                 available_agents=self.available_agents,
@@ -311,61 +483,7 @@ class DATPServer:
                 selected_agent=selected_agent,
                 selected_session_key=conversation.get("session_key"),
             )
-            await entry["ws"].send(json.dumps(ack))
-
-        return conversation
-
-    async def _handle_hello(self, ws, msg: dict[str, Any]) -> None:
-        """Process a hello handshake, register device, and send hello_ack."""
-        device_id = msg["device_id"]
-        payload: dict[str, Any] = msg.get("payload", {})
-        requested_conversation = payload.get("conversation") if isinstance(payload.get("conversation"), dict) else {}
-        session_id = f"sess_{secrets.token_hex(8)}"
-
-        # Mark this device online BEFORE closing the old WebSocket.
-        # This prevents the old connection's _handle_connection finally block
-        # from incorrectly calling device_disconnected and marking the new session offline.
-        if self.registry is not None:
-            self.registry._mark_online(device_id)
-
-        # Disconnect any prior connection for this device_id before replacing.
-        # This prevents a stale WebSocket from receiving commands after a reconnect.
-        if device_id in self.device_registry:
-            old_entry = self.device_registry[device_id]
-            try:
-                await old_entry["ws"].close()
-            except websockets.ConnectionClosed:
-                pass
-
-        # TODO (Step 3+): validate nonce for replay-attack prevention.
-        #   Track recent nonces in a bounded set; reject a hello whose nonce
-        #   matches a recently seen value.
-        # TODO (Step 3+): resume_token support.
-        #   If resume_token is provided, look up the previous session and
-        #   restore state rather than starting fresh.
-        conversation, selected_agent = self._resolve_conversation(device_id, requested_conversation)
-
-        entry: DeviceEntry = {
-            "ws": ws,
-            "session_id": session_id,
-            "capabilities": payload.get("capabilities", {}),
-            "resume_token": payload.get("resume_token"),
-            "nonce": payload.get("nonce"),
-            "conversation": conversation,
-        }
-        self.device_registry[device_id] = entry
-
-        ack = build_hello_ack(
-            session_id=session_id,
-            device_id=device_id,
-            default_agent=self.default_agent,
-            available_agents=self.available_agents,
-            available_backends=self.available_backends,
-            selected_backend=conversation.get("backend_id"),
-            selected_agent=selected_agent,
-            selected_session_key=conversation.get("session_key"),
-        )
-        await ws.send(json.dumps(ack))
+            await ws.send(json.dumps(ack))
         logger.info("device registered: device_id=%r session_id=%r", device_id, session_id)
 
         # Integrate with registry service if available

@@ -7,7 +7,7 @@ import pytest
 gateway_src = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(gateway_src))
 
-from channel.factory import create_backend_catalog_from_env, create_backend_from_env
+from channel.factory import BackendCatalog, BackendProfile, create_backend_catalog_from_env, create_backend_from_env
 from channel.codex_backend import CodexBackend
 from channel.hermes_backend import HermesBackend
 from channel.openclaw_backend import OpenClawBackend
@@ -126,6 +126,29 @@ def test_factory_builds_catalog_from_json(monkeypatch):
     assert [item["id"] for item in catalog.available_backends()] == ["pi-fast", "codex-main"]
     assert isinstance(catalog.get("pi-fast"), SubprocessPiBackend)
     assert isinstance(catalog.get("codex-main"), CodexBackend)
+
+
+def test_factory_raises_for_duplicate_backend_ids(monkeypatch):
+    monkeypatch.setenv(
+        "OI_AGENT_BACKENDS_JSON",
+        '[{"id":"dup","backend":"pi"},{"id":"dup","backend":"codex","command":"codex exec --json"}]',
+    )
+
+    with pytest.raises(ValueError, match="duplicate backend id"):
+        create_backend_catalog_from_env()
+
+
+def test_backend_catalog_raises_for_duplicate_profile_ids():
+    backend = SubprocessPiBackend()
+
+    with pytest.raises(ValueError, match="duplicate backend id"):
+        BackendCatalog(
+            [
+                BackendProfile(id="dup", label="One", backend=backend),
+                BackendProfile(id="dup", label="Two", backend=backend),
+            ],
+            default_backend_id="dup",
+        )
 
 
 def test_factory_raises_for_unknown_backend(monkeypatch):

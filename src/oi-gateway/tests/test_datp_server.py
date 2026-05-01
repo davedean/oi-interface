@@ -242,6 +242,236 @@ async def test_device_conversation_updates_are_isolated_per_device(server):
 
 
 @pytest.mark.asyncio
+async def test_conversation_update_rejects_spoofed_device_id(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent, {"id": "build", "name": "Build"}]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws_a, websockets.connect(f"ws://localhost:{server.port}/datp") as ws_b:
+        await ws_a.send(json.dumps(make_hello("device-a")))
+        await ws_b.send(json.dumps(make_hello("device-b")))
+        await asyncio.wait_for(ws_a.recv(), timeout=5.0)
+        await asyncio.wait_for(ws_b.recv(), timeout=5.0)
+
+        await ws_a.send(json.dumps({
+            "v": "datp",
+            "type": "event",
+            "id": "evt_spoof",
+            "device_id": "device-b",
+            "ts": "2026-04-27T04:43:00.000Z",
+            "payload": {
+                "event": "conversation.update",
+                "conversation": {"backend_id": "codex"},
+            },
+        }))
+        resp = json.loads(await asyncio.wait_for(ws_a.recv(), timeout=5.0))
+        assert resp["type"] == "error"
+        assert resp["payload"]["code"] == "DEVICE_ID_MISMATCH"
+        assert server.get_device_conversation("device-b") == {
+            "backend_id": "pi",
+            "agent_id": "main",
+            "session_key": "oi:device:device-b",
+        }
+
+
+@pytest.mark.asyncio
+async def test_non_hello_messages_reject_spoofed_device_id_and_do_not_emit(server):
+    received: list[tuple[str, str, dict]] = []
+
+    def handler(event_type: str, device_id: str, payload: dict):
+        received.append((event_type, device_id, payload))
+
+    server.event_bus.subscribe(handler)
+    try:
+        async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws_a, websockets.connect(f"ws://localhost:{server.port}/datp") as ws_b:
+            await ws_a.send(json.dumps(make_hello("device-a")))
+            await ws_b.send(json.dumps(make_hello("device-b")))
+            await asyncio.wait_for(ws_a.recv(), timeout=5.0)
+            await asyncio.wait_for(ws_b.recv(), timeout=5.0)
+
+            spoofed = make_event("device-b")
+            spoofed["id"] = "evt_spoof_event"
+            await ws_a.send(json.dumps(spoofed))
+            resp = json.loads(await asyncio.wait_for(ws_a.recv(), timeout=5.0))
+            assert resp["type"] == "error"
+            assert resp["payload"]["code"] == "DEVICE_ID_MISMATCH"
+            assert received == []
+    finally:
+        server.event_bus.unsubscribe(handler)
+
+
+@pytest.mark.asyncio
+async def test_conversation_update_rejects_invalid_backend_and_session_key_type(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent, {"id": "build", "name": "Build"}]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws:
+        await ws.send(json.dumps(make_hello("device-invalid")))
+        await asyncio.wait_for(ws.recv(), timeout=5.0)
+
+        await ws.send(json.dumps({
+            "v": "datp",
+            "type": "event",
+            "id": "evt_invalid_backend",
+            "device_id": "device-invalid",
+            "ts": "2026-04-27T04:44:00.000Z",
+            "payload": {
+                "event": "conversation.update",
+                "conversation": {"backend_id": "missing"},
+            },
+        }))
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        assert resp["type"] == "error"
+        assert resp["payload"]["code"] == "INVALID_CONVERSATION"
+        assert "backend_id" in resp["payload"]["message"]
+
+        await ws.send(json.dumps({
+            "v": "datp",
+            "type": "event",
+            "id": "evt_invalid_session_key",
+            "device_id": "device-invalid",
+            "ts": "2026-04-27T04:45:00.000Z",
+            "payload": {
+                "event": "conversation.update",
+                "conversation": {"session_key": 123},
+            },
+        }))
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        assert resp["type"] == "error"
+        assert resp["payload"]["code"] == "INVALID_CONVERSATION"
+        assert "session_key" in resp["payload"]["message"]
+        assert server.get_device_conversation("device-invalid") == {
+            "backend_id": "pi",
+            "agent_id": "main",
+            "session_key": "oi:device:device-invalid",
+        }
+
+
+@pytest.mark.asyncio
+async def test_hello_rejects_invalid_conversation_types(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws:
+        hello = make_hello("bad-hello")
+        hello["payload"]["conversation"] = {"session_key": 123}
+        await ws.send(json.dumps(hello))
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        assert resp["type"] == "error"
+        assert resp["payload"]["code"] == "INVALID_CONVERSATION"
+        assert "session_key" in resp["payload"]["message"]
+        assert "bad-hello" not in server.device_registry
+
+
+@pytest.mark.asyncio
+async def test_hello_rejects_unknown_backend_and_agent(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws:
+        hello = make_hello("bad-selection")
+        hello["payload"]["conversation"] = {"backend_id": "missing", "agent_id": "missing"}
+        await ws.send(json.dumps(hello))
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        assert resp["type"] == "error"
+        assert resp["payload"]["code"] == "INVALID_CONVERSATION"
+        assert "backend_id" in resp["payload"]["message"] or "agent_id" in resp["payload"]["message"]
+        assert "bad-selection" not in server.device_registry
+
+
+@pytest.mark.asyncio
+async def test_hello_rejects_non_object_conversation_and_preserves_existing_connection(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent]
+
+    ws1 = await websockets.connect(f"ws://localhost:{server.port}/datp")
+    await ws1.send(json.dumps(make_hello("same-device", hello_id="hello_ok")))
+    ok_resp = json.loads(await asyncio.wait_for(ws1.recv(), timeout=5.0))
+    assert ok_resp["type"] == "hello_ack"
+
+    ws2 = await websockets.connect(f"ws://localhost:{server.port}/datp")
+    bad_hello = make_hello("same-device", hello_id="hello_bad")
+    bad_hello["payload"]["conversation"] = []
+    await ws2.send(json.dumps(bad_hello))
+    resp = json.loads(await asyncio.wait_for(ws2.recv(), timeout=5.0))
+    assert resp["type"] == "error"
+    assert resp["payload"]["code"] == "INVALID_CONVERSATION"
+    assert server.get_device_conversation("same-device") == {
+        "backend_id": "pi",
+        "agent_id": "main",
+        "session_key": "oi:device:same-device",
+    }
+
+    await ws1.send(json.dumps(make_event("same-device")))
+    await asyncio.sleep(0.05)
+    assert "same-device" in server.device_registry
+
+    await ws1.close()
+    await ws2.close()
+
+
+@pytest.mark.asyncio
+async def test_conversation_update_rejects_non_object_conversation(server):
+    server.available_backends = [{"id": "pi", "name": "Pi"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent]
+
+    async with websockets.connect(f"ws://localhost:{server.port}/datp") as ws:
+        await ws.send(json.dumps(make_hello("bad-update")))
+        await asyncio.wait_for(ws.recv(), timeout=5.0)
+        await ws.send(json.dumps({
+            "v": "datp",
+            "type": "event",
+            "id": "evt_bad_container",
+            "device_id": "bad-update",
+            "ts": "2026-04-27T04:46:00.000Z",
+            "payload": {
+                "event": "conversation.update",
+                "conversation": [],
+            },
+        }))
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+        assert resp["type"] == "error"
+        assert resp["payload"]["code"] == "INVALID_CONVERSATION"
+        assert "object" in resp["payload"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_update_device_conversation_handles_disconnect_during_ack(server):
+    class ClosingSocket:
+        async def send(self, _raw: str) -> None:
+            raise websockets.ConnectionClosedOK(None, None)
+
+    server.available_backends = [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]
+    server.default_backend_id = "pi"
+    server.default_agent = {"id": "main", "name": "Main"}
+    server.available_agents = [server.default_agent]
+    server.device_registry["disco"] = {
+        "ws": ClosingSocket(),
+        "session_id": "sess-disc",
+        "conversation": {"backend_id": "pi", "agent_id": "main", "session_key": "oi:device:disco"},
+    }
+
+    updated = await server.update_device_conversation("disco", backend_id="codex", notify_device=True)
+
+    assert updated == {
+        "backend_id": "codex",
+        "agent_id": "main",
+        "session_key": "oi:device:disco",
+    }
+
+
+@pytest.mark.asyncio
 async def test_event_emit(server):
     """Connect, subscribe to event bus, send an event, assert callback was called."""
     received: list[tuple[str, str, dict]] = []

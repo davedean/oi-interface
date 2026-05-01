@@ -165,6 +165,11 @@ class GatewayAPI:
         except json.JSONDecodeError:
             raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid JSON body"}))
 
+    def _require_json_object(self, payload: Any, *, error_message: str = "Request body must be a JSON object") -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise web.HTTPBadRequest(text=json.dumps({"error": error_message}))
+        return payload
+
     def _require_registered_device(self, device_id: str) -> dict[str, Any] | None:
         return self._datp.device_registry.get(device_id)
 
@@ -338,15 +343,24 @@ class GatewayAPI:
         if self._require_registered_device(device_id) is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 
-        body = await self._read_json(request)
-        conversation = body.get("conversation") if isinstance(body.get("conversation"), dict) else body
-        updated = await self._datp.update_device_conversation(
-            device_id,
-            backend_id=conversation.get("backend_id"),
-            agent_id=conversation.get("agent_id"),
-            session_key=conversation.get("session_key"),
-            notify_device=True,
-        )
+        try:
+            body = self._require_json_object(await self._read_json(request))
+            if "conversation" in body and not isinstance(body.get("conversation"), dict):
+                raise web.HTTPBadRequest(text=json.dumps({"error": "conversation must be a JSON object"}))
+            conversation = body.get("conversation") if isinstance(body.get("conversation"), dict) else body
+            conversation = self._require_json_object(conversation, error_message="conversation must be a JSON object")
+        except web.HTTPBadRequest as exc:
+            return web.Response(text=exc.text, content_type="application/json", status=exc.status)
+        try:
+            updated = await self._datp.update_device_conversation(
+                device_id,
+                backend_id=conversation.get("backend_id"),
+                agent_id=conversation.get("agent_id"),
+                session_key=conversation.get("session_key"),
+                notify_device=True,
+            )
+        except ValueError as exc:
+            return self._error_response(str(exc), 400)
         if updated is None:
             return self._error_response(f"Device '{device_id}' not found", 404)
 

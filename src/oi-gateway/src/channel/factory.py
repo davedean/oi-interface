@@ -26,6 +26,10 @@ class BackendCatalog:
     def __init__(self, profiles: list[BackendProfile], default_backend_id: str) -> None:
         if not profiles:
             raise ValueError("at least one backend profile is required")
+        ids = [profile.id for profile in profiles]
+        duplicates = sorted({profile_id for profile_id in ids if ids.count(profile_id) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate backend id(s): {', '.join(duplicates)}")
         self._profiles = {profile.id: profile for profile in profiles}
         if default_backend_id not in self._profiles:
             raise ValueError(f"unknown default backend id: {default_backend_id}")

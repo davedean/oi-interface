@@ -148,6 +148,27 @@ async def test_device_conversation_endpoints(api):
         notify_device=True,
     )
 
+    api._datp.update_device_conversation.reset_mock()
+    nested = response_json(await api._update_device_conversation(DummyRequest(match_info={"device_id": device_id}, body={
+        "conversation": {"backend_id": "codex"},
+    })))
+    assert nested["ok"] is True
+    api._datp.update_device_conversation.assert_awaited_once_with(
+        device_id,
+        backend_id="codex",
+        agent_id=None,
+        session_key=None,
+        notify_device=True,
+    )
+
+    invalid_body = await api._update_device_conversation(DummyRequest(match_info={"device_id": device_id}, body=[]))
+    assert invalid_body.status == 400
+    assert "JSON object" in response_json(invalid_body)["error"]
+
+    invalid_nested = await api._update_device_conversation(DummyRequest(match_info={"device_id": device_id}, body={"conversation": []}))
+    assert invalid_nested.status == 400
+    assert "conversation must be a JSON object" in response_json(invalid_nested)["error"]
+
     missing = await api._device_conversation_info(DummyRequest(match_info={"device_id": "missing"}))
     assert missing.status == 404
 
