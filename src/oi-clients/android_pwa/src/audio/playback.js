@@ -1,3 +1,5 @@
+import { bytesToBase64 } from '../datp/envelope.js';
+
 export class AudioPlayback {
   constructor({ audioFactory = () => new Audio(), AudioContextImpl = globalThis.AudioContext || globalThis.webkitAudioContext } = {}) {
     this.audioFactory = audioFactory;
@@ -64,9 +66,7 @@ export function pcm16WavBlob(pcmBytes, sampleRate = 22050) {
 
 function silentWavDataUrl() {
   const bytes = new Uint8Array([82,73,70,70,38,0,0,0,87,65,86,69,102,109,116,32,16,0,0,0,1,0,1,0,64,31,0,0,128,62,0,0,2,0,16,0,100,97,116,97,2,0,0,0,0,0]);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `data:audio/wav;base64,${btoa(binary)}`;
+  return `data:audio/wav;base64,${bytesToBase64(bytes)}`;
 }
 
 function writeAscii(view, offset, text) {
