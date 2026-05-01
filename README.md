@@ -69,8 +69,7 @@ oi-project-docs/             ← public specs and architecture docs
 
 | Document | Purpose |
 |---|---|
-| [`oi-project-docs/README.md`](oi-project-docs/README.md) | Public documentation entry point |
-| [`oi-project-docs/INDEX.md`](oi-project-docs/INDEX.md) | Public documentation index |
+| [`oi-project-docs/README.md`](oi-project-docs/README.md) | Public documentation entry point and index |
 | [`start-oi.sh`](start-oi.sh) | Launcher for the gateway plus dashboard (`pi`, `hermes`, and `openclaw` backends) |
 | [`src/oi-gateway/OPENCLAW.md`](src/oi-gateway/OPENCLAW.md) | OpenClaw backend setup and local wiring |
 | [`src/oi-gateway/hermes.env.example`](src/oi-gateway/hermes.env.example) | Hermes backend env template |

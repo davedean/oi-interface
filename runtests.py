@@ -11,23 +11,41 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+
+@dataclass(frozen=True)
+class Suite:
+    path: Path
+    extra_args: list[str] = field(default_factory=list)
+
+
 SUITES = [
-    ROOT / "src" / "oi-cli",
-    ROOT / "src" / "oi-gateway",
-    ROOT / "src" / "oi-clients" / "oi-sim",
-    ROOT / "src" / "oi-dashboard",
-    ROOT / "src" / "oi-clients",
+    Suite(ROOT / "src" / "oi-cli"),
+    Suite(ROOT / "src" / "oi-gateway"),
+    Suite(ROOT / "src" / "oi-clients" / "oi-sim"),
+    Suite(ROOT / "src" / "oi-dashboard"),
+    Suite(ROOT / "src" / "oi-clients", ["--ignore=oi-sim"]),
 ]
+
+
+def pytest_command() -> list[str]:
+    """Use the repo virtualenv when present, otherwise use this interpreter."""
+    venv_python = ROOT / ".venv" / "bin" / "python"
+    python = venv_python if venv_python.exists() else Path(sys.executable)
+    return [str(python), "-m", "pytest", "-q"]
 
 
 def main() -> int:
     overall_rc = 0
+    command = pytest_command()
+    print(f"Using pytest via: {' '.join(command)}", flush=True)
     for suite in SUITES:
-        print(f"\n=== pytest: {suite.relative_to(ROOT)} ===", flush=True)
-        result = subprocess.run(["pytest", "-q"], cwd=suite)
+        print(f"\n=== pytest: {suite.path.relative_to(ROOT)} ===", flush=True)
+        result = subprocess.run([*command, *suite.extra_args], cwd=suite.path)
         if result.returncode != 0:
             overall_rc = result.returncode
     return overall_rc

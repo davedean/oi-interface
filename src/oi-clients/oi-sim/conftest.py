@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 # Add oi-gateway/src to sys.path so `from datp import ...` works in tests.
-_GW_SRC = Path(__file__).resolve().parents[1] / "oi-gateway" / "src"
+_GW_SRC = Path(__file__).resolve().parents[3] / "src" / "oi-gateway" / "src"
 if str(_GW_SRC) not in sys.path:
     sys.path.insert(0, str(_GW_SRC))
 

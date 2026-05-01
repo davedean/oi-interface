@@ -105,6 +105,73 @@ Read:
 3. `docs/specs/human-interaction-spec.md`
 4. `docs/specs/datp-wire-protocol.md`
 
+## Documentation index
+
+### Foundations
+
+- `docs/00-vision.md`
+- `docs/01-design-principles.md`
+- `docs/02-glossary.md`
+
+### Architecture
+
+- `docs/architecture/system-overview.md`
+- `docs/architecture/agent-runtime.md`
+- `docs/architecture/capability-aggregation.md`
+- `docs/architecture/device-registry.md`
+- `docs/architecture/device-runtime.md`
+- `docs/architecture/local-first-and-remote.md`
+- `docs/architecture/memory-and-wiki.md`
+- `docs/architecture/server-device-agent-topology.md`
+
+### Specs
+
+- `docs/specs/application-protocol.md`
+- `docs/specs/character-status-spec.md`
+- `docs/specs/datp-wire-protocol.md`
+- `docs/specs/device-capability-model.md`
+- `docs/specs/human-interaction-spec.md`
+- `docs/specs/oi-channel-protocol.md`
+- `docs/specs/oi-device-handshake.md`
+- `docs/specs/oi-resource-tree.md`
+- `docs/specs/security-model.md`
+- `docs/specs/task-ledger.md`
+- `docs/specs/tool-broker-and-permissions.md`
+
+### Integrations
+
+- `docs/integrations/hermes-agent.md`
+- `docs/integrations/hermes-mqtt-rhasspy.md`
+- `docs/integrations/home-assistant.md`
+- `docs/integrations/mcp.md`
+- `docs/integrations/openclaw.md`
+
+### Product
+
+- `docs/product/apple-ecosystem.md`
+- `docs/product/design-language.md`
+- `docs/product/hosted-oi-gateway.md`
+- `docs/product/positioning.md`
+- `docs/product/user-stories.md`
+
+### ADRs
+
+- `docs/adr/0001-one-mind-many-bodies.md`
+- `docs/adr/0002-device-owns-embodiment.md`
+- `docs/adr/0003-api-source-proc-projection.md`
+- `docs/adr/0004-hosted-gateway-not-hosted-agent.md`
+- `docs/adr/0005-capabilities-aggregate-at-server.md`
+
+### Examples and schemas
+
+- `examples/datp-session.jsonl`
+- `examples/device-registry.json`
+- `examples/oi-handshake.json`
+- `schemas/command.schema.json`
+- `schemas/device.schema.json`
+- `schemas/event.schema.json`
+- `schemas/oi-channel-message.schema.json`
+
 # Oi rename and strategic update
 
 Working public name: **Oi**.
