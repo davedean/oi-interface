@@ -12,6 +12,7 @@ RESTART_HOLD_SECONDS = 3.0
 DEBOUNCE_SECONDS = 0.35
 SHORTCUT_IDLE_WINDOW_SECONDS = 0.75
 SHORTCUT_POLL_WINDOW_SECONDS = 3.5
+RELEASE_SETTLE_SECONDS = 0.15
 
 
 @dataclass(frozen=True)
@@ -73,8 +74,41 @@ async def check_manual_mapping_shortcut(renderer, input_device) -> bool:
                 saw_activity = True
             restart_hold_started, restart_now = _update_restart_hold(held_buttons, restart_hold_started, event, time.time())
             if restart_now:
+                await _wait_for_buttons_released(renderer, input_device, held_buttons)
                 return True
 
+        await asyncio.sleep(0.033)
+
+
+async def _wait_for_buttons_released(renderer, input_device, held_buttons: set[int]) -> None:
+    last_nonempty = time.time()
+    while held_buttons:
+        renderer.clear()
+        renderer.draw_title("Oi — BUTTON SETUP", online=False)
+        renderer.draw_card(
+            "Button Setup",
+            [
+                "Release all buttons to begin mapping.",
+                "",
+                f"Controller: {input_device.controller_name()}",
+            ],
+            0,
+            ascii_bg_lines=["[ ready ]"],
+        )
+        renderer.draw_hints("Release buttons to continue")
+        renderer.present()
+
+        now = time.time()
+        for event in input_device.poll_raw():
+            if event.type == "button":
+                if event.action == "released":
+                    held_buttons.discard(int(event.value))
+                elif event.action == "pressed":
+                    held_buttons.add(int(event.value))
+            if held_buttons:
+                last_nonempty = now
+        if not held_buttons and (now - last_nonempty) >= RELEASE_SETTLE_SECONDS:
+            break
         await asyncio.sleep(0.033)
 
 

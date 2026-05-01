@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 import sys
 
@@ -13,6 +12,7 @@ if str(client_src) not in sys.path:
 import oi_client.button_mapping as mapping_mod
 from oi_client.button_mapping import (
     DEBOUNCE_SECONDS,
+    RELEASE_SETTLE_SECONDS,
     RESTART_HOLD_SECONDS,
     SHORTCUT_IDLE_WINDOW_SECONDS,
     _advance_release_guard,
@@ -21,6 +21,7 @@ from oi_client.button_mapping import (
     _mapping_signature,
     _resolve_mapping_event,
     _update_restart_hold,
+    _wait_for_buttons_released,
     check_manual_mapping_shortcut,
 )
 from oi_client.input import RawInputEvent
@@ -120,13 +121,34 @@ def test_duplicate_press_detection_uses_debounce_window() -> None:
 
 
 @pytest.mark.asyncio
+async def test_wait_for_buttons_released_drains_held_buttons(monkeypatch) -> None:
+    renderer = StubRenderer()
+    input_device = StubShortcutInput([
+        [RawInputEvent("button", "released", 1)],
+        [RawInputEvent("button", "released", 2)],
+    ])
+    held = {1, 2}
+    times = iter([0.0, 0.0, RELEASE_SETTLE_SECONDS + 0.01, RELEASE_SETTLE_SECONDS + 0.01])
+    monkeypatch.setattr(mapping_mod.time, "time", lambda: next(times))
+
+    async def fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(mapping_mod.asyncio, "sleep", fake_sleep)
+    await _wait_for_buttons_released(renderer, input_device, held)
+
+    assert held == set()
+
+
+@pytest.mark.asyncio
 async def test_manual_mapping_shortcut_triggers_after_two_button_hold(monkeypatch) -> None:
     renderer = StubRenderer()
     input_device = StubShortcutInput([
         [RawInputEvent("button", "pressed", 1), RawInputEvent("button", "pressed", 2)],
         [RawInputEvent("button", "pressed", 2)],
+        [RawInputEvent("button", "released", 1), RawInputEvent("button", "released", 2)],
     ])
-    times = iter([0.0, 0.0, 0.0, 0.0, 3.2, 3.2])
+    times = iter([0.0, 0.0, 0.0, 0.0, 3.2, 3.2, 3.3, 3.3])
     monkeypatch.setattr(mapping_mod.time, "time", lambda: next(times))
 
     async def fake_sleep(_seconds):
