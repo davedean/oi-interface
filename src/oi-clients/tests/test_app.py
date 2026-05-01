@@ -216,6 +216,38 @@ async def test_send_prompt_surfaces_send_failures(app: HandheldApp) -> None:
 
 
 @pytest.mark.asyncio
+async def test_speculative_recording_starts_on_press_and_discards_short_tap(app: HandheldApp) -> None:
+    app.datp = SimpleNamespace(is_connected=True, send_event=AsyncMock())
+    app._ui_mode = UIMode.HOME
+
+    await app._handle_input(SimpleNamespace(type="button", name="x", action="pressed", raw=0))
+    assert app.audio.is_recording is True
+    assert app._x_pre_recording is True
+    assert app._card.body == "Hold X…"
+
+    await app._handle_input(SimpleNamespace(type="button", name="x", action="released", raw=0))
+    assert app.audio.is_recording is False
+    assert app._x_pre_recording is False
+    assert app._card.title == "Oi"
+
+
+@pytest.mark.asyncio
+async def test_stream_recorded_audio_sends_incremental_chunks(app: HandheldApp, monkeypatch) -> None:
+    app.datp = SimpleNamespace(is_connected=True, send_audio_chunk=AsyncMock())
+    app.audio.recording = True
+    app.audio.pending = b"live-chunk"
+    app._ui_mode = UIMode.RECORDING
+    app._record_tx_stream_id = "rec-live"
+    app._record_tx_seq = 3
+
+    await app._stream_recorded_audio()
+
+    app.datp.send_audio_chunk.assert_awaited_once_with("rec-live", 3, b"live-chunk", 16000)
+    assert app._record_tx_seq == 4
+    assert "Streaming audio" in app._card.body
+
+
+@pytest.mark.asyncio
 async def test_start_and_stop_recording_flush_audio_chunks(app: HandheldApp, monkeypatch) -> None:
     app.datp = SimpleNamespace(
         is_connected=True,

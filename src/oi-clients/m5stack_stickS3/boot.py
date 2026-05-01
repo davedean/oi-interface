@@ -12,6 +12,7 @@ This module initializes hardware on boot:
 import machine
 import gc
 import utime
+import ubinascii
 
 
 # Import hardware modules
@@ -78,6 +79,9 @@ class Firmware:
         # DATP client (will be initialized after WiFi connect)
         self.client = None
         self.datp_device = DeviceState()
+        self._recording_seq = 0
+        self._speculative_recording = False
+        self._preroll_chunks = []
         
         # Device config
         self.device_id = self._load_device_id()
@@ -161,6 +165,13 @@ class Firmware:
         
         if self.client and self.client.connection_state == 3:  # Connected
             self.client.send_event("button.pressed", button=name)
+        
+        # Pre-roll audio immediately so the long-hold threshold does not clip
+        # the start of speech. If the press becomes a tap, release discards it.
+        if self.datp_device.can_record() and not self.audio.is_recording():
+            if self.audio.start_recording():
+                self._speculative_recording = True
+                self.status_display.show_status("listening", "Hold to talk...")
     
     def _on_button_released(self, name: str):
         """Handle button released."""
@@ -168,6 +179,13 @@ class Firmware:
         
         if self.client and self.client.connection_state == 3:
             self.client.send_event("button.released", button=name)
+        
+        if self._speculative_recording and self.audio.is_recording():
+            # Short press: discard pre-roll and return to ready.
+            self.audio.stop_recording()
+            self._speculative_recording = False
+            self._preroll_chunks = []
+            self.status_display.show_status("idle", "Ready")
     
     def _on_long_hold_start(self, name: str, duration_ms: int):
         """Handle long hold started."""
@@ -177,33 +195,79 @@ class Firmware:
             self.datp_device.set_mode("RECORDING")
             self.status_display.show_status("listening", "Recording...")
             
-            # Start audio recording
-            self.audio.start_recording()
+            # If speculative recording is already running from button-down,
+            # keep it and publish the buffered stream. Otherwise start now.
+            if not self.audio.is_recording():
+                self.audio.start_recording()
+            self._speculative_recording = False
+            self._recording_seq = 0
             
             # Send event
             if self.client and self.client.connection_state == 3:
                 stream_id = self.datp_device.get_current_stream_id()
                 self.client.send_event("audio.recording_started", stream_id=stream_id)
+                self._flush_preroll_chunks(stream_id)
     
     def _on_long_hold_end(self, name: str, duration_ms: int):
         """Handle long hold ended."""
         print("Long hold ended:", name, duration_ms)
         
         if self.datp_device.get_mode() == "RECORDING":
+            stream_id = self.datp_device.get_current_stream_id()
+            duration = self.datp_device.get_recording_duration_ms()
+            
+            # Send final chunk before leaving RECORDING mode so tail audio is not dropped.
+            if self.client and self.client.connection_state == 3:
+                self._stream_recording_chunk(force=True)
+            
             # Stop recording
             self.datp_device.set_mode("UPLOADING")
             audio_data = self.audio.stop_recording()
             
             # Send recording finished event
-            if self.client and self.client.connection_state == 3:
-                stream_id = self.datp_device.get_current_stream_id()
-                duration = self.audio.get_recording_duration_ms()
+            if self.client and self.client.connection_state == 3 and stream_id:
                 self.client.send_audio_recording_finished(stream_id, duration)
-                # In real implementation, would send audio chunks here
             
             # Transition to thinking
             self.datp_device.set_mode("THINKING")
             self.status_display.show_status("thinking", "Processing...")
+    
+    def _stream_recording_chunk(self, force: bool = False):
+        """Read and send one microphone chunk while recording."""
+        if not self.client or self.client.connection_state != 3:
+            return
+        if not force and self.datp_device.get_mode() != "RECORDING":
+            return
+        stream_id = self.datp_device.get_current_stream_id()
+        if not stream_id:
+            return
+        chunk = self.audio.read_audio_chunk()
+        if not chunk:
+            return
+        self._send_recording_chunk(stream_id, chunk)
+    
+    def _capture_preroll_chunk(self):
+        """Keep short button-down pre-roll until long-hold confirms voice input."""
+        if not self._speculative_recording or not self.audio.is_recording():
+            return
+        chunk = self.audio.read_audio_chunk()
+        if chunk:
+            self._preroll_chunks.append(chunk)
+    
+    def _flush_preroll_chunks(self, stream_id: str):
+        """Send captured pre-roll chunks once a stream ID exists."""
+        for chunk in self._preroll_chunks:
+            self._send_recording_chunk(stream_id, chunk)
+        self._preroll_chunks = []
+    
+    def _send_recording_chunk(self, stream_id: str, chunk: bytes):
+        """Base64 encode and send a microphone chunk."""
+        try:
+            data_b64 = ubinascii.b2a_base64(chunk).decode().strip()
+            self.client.send_audio_chunk(stream_id, self._recording_seq, data_b64, 44100, 2)
+            self._recording_seq += 1
+        except Exception as e:
+            print("Audio stream send failed:", e)
     
     # Command handlers
     def _handle_display_status(self, args: dict):
@@ -313,6 +377,10 @@ class Firmware:
         
         # Update status display (animation)
         self.status_display.update()
+        
+        # Stream microphone audio while recording so gateway upload overlaps capture.
+        self._capture_preroll_chunk()
+        self._stream_recording_chunk()
         
         # Poll DATP client
         if self.client:

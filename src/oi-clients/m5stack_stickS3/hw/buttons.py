@@ -24,7 +24,7 @@ BTN_PULL = machine.Pin.PULL_UP
 BTN_ACTIVE = 0  # Active low (pressed = 0)
 
 # Default thresholds
-DEFAULT_LONG_HOLD_MS = 1000  # 1 second for long hold
+DEFAULT_LONG_HOLD_MS = 350  # fast voice hold-to-talk threshold
 
 
 class Button:

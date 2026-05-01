@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .tts import TtsBackend, generate_response_id, _wav_to_pcm_chunks, encode_pcm_to_base64
@@ -16,6 +18,63 @@ logger = logging.getLogger(__name__)
 
 # Default chunk size for audio cache transfer (bytes)
 DEFAULT_CHUNK_SIZE = 1024
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|(?<=,)\s+")
+
+
+@dataclass
+class ResponseTextSegmenter:
+    """Incrementally split streamed text into stable TTS-sized speech units."""
+
+    min_chars: int = 48
+    max_buffer_chars: int = 180
+    _buffer: str = ""
+
+    def push(self, text_delta: str) -> list[str]:
+        """Append a text delta and return complete segments ready for TTS."""
+        if not text_delta:
+            return []
+        self._buffer += text_delta
+        return self._pop_ready_segments()
+
+    def flush(self) -> str:
+        """Return any remaining buffered text."""
+        text = self._buffer.strip()
+        self._buffer = ""
+        return text
+
+    def _pop_ready_segments(self) -> list[str]:
+        segments: list[str] = []
+        while True:
+            boundary = self._find_boundary()
+            if boundary is None:
+                if len(self._buffer) <= self.max_buffer_chars:
+                    break
+                boundary = self._fallback_boundary()
+            segment = self._buffer[:boundary].strip()
+            self._buffer = self._buffer[boundary:].lstrip()
+            if segment:
+                segments.append(segment)
+        return segments
+
+    def _find_boundary(self) -> int | None:
+        for match in _SENTENCE_BOUNDARY_RE.finditer(self._buffer):
+            end = match.end()
+            if end >= self.min_chars:
+                return end
+        return None
+
+    def _fallback_boundary(self) -> int:
+        window = self._buffer[: self.max_buffer_chars]
+        split_at = max(window.rfind(" "), window.rfind("\n"))
+        if split_at < self.min_chars:
+            return min(len(self._buffer), self.max_buffer_chars)
+        return split_at + 1
+
+
+@dataclass
+class _StreamSpeechState:
+    segmenter: ResponseTextSegmenter
+    tasks: list[asyncio.Task] = field(default_factory=list)
 
 
 class AudioDeliveryPipeline:
@@ -45,6 +104,8 @@ class AudioDeliveryPipeline:
         dispatcher: CommandDispatcher,
         tts: TtsBackend,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
+        min_stream_segment_chars: int = 48,
+        max_stream_segment_chars: int = 180,
     ) -> None:
         if dispatcher is None:
             raise TypeError("dispatcher is required")
@@ -55,8 +116,11 @@ class AudioDeliveryPipeline:
         self._dispatcher = dispatcher
         self._tts = tts
         self._chunk_size = chunk_size
+        self._min_stream_segment_chars = min_stream_segment_chars
+        self._max_stream_segment_chars = max_stream_segment_chars
         self._device_locks: dict[str, asyncio.Lock] = {}
         self._lock_creation_lock = asyncio.Lock()
+        self._stream_states: dict[tuple[str, str], _StreamSpeechState] = {}
 
         event_bus.subscribe(self._on_event)
         logger.info("AudioDeliveryPipeline started (chunk_size=%d)", chunk_size)
@@ -66,27 +130,63 @@ class AudioDeliveryPipeline:
 
         Routes ``agent_response`` events to the async handler.
         """
-        if event_type != "agent_response":
+        if event_type == "agent_response":
+            if payload.get("streaming_used"):
+                logger.debug("Skipping final agent_response audio because streaming deltas handled TTS")
+                return
+            response_text = payload.get("response_text", "").strip()
+            if not response_text:
+                logger.debug("Skipping agent_response with empty response_text")
+                return
+            self._schedule_delivery(device_id, payload, response_text)
             return
 
-        response_text = payload.get("response_text", "").strip()
-        if not response_text:
-            logger.debug("Skipping agent_response with empty response_text")
+        if event_type in {"agent_response_stream", "agent_response_delta"}:
+            self._handle_stream_delta(device_id, payload)
             return
 
-        # Schedule async processing
+    def _schedule_delivery(self, device_id: str, payload: dict[str, Any], response_text: str) -> asyncio.Task | None:
+        """Schedule TTS delivery if an event loop is available."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             logger.warning("No event loop running; cannot schedule audio delivery")
-            return
+            return None
 
-        if loop.is_running():
-            asyncio.ensure_future(
-                self._deliver_audio(device_id, payload, response_text)
-            )
-        else:
+        if not loop.is_running():
             logger.warning("Event loop not running; cannot schedule audio delivery")
+            return None
+
+        task = asyncio.ensure_future(self._deliver_audio(device_id, payload, response_text))
+        return task
+
+    def _handle_stream_delta(self, device_id: str, payload: dict[str, Any]) -> None:
+        """Turn streamed agent text into small TTS deliveries as soon as stable."""
+        text_delta = payload.get("text_delta", "") or ""
+        is_final = bool(payload.get("is_final", False))
+        stream_id = str(payload.get("stream_id") or payload.get("correlation_id") or "default")
+        key = (device_id, stream_id)
+        state = self._stream_states.get(key)
+        if state is None:
+            state = _StreamSpeechState(
+                segmenter=ResponseTextSegmenter(
+                    min_chars=self._min_stream_segment_chars,
+                    max_buffer_chars=self._max_stream_segment_chars,
+                )
+            )
+            self._stream_states[key] = state
+
+        segments = state.segmenter.push(text_delta)
+        if is_final:
+            final_segment = state.segmenter.flush()
+            if final_segment:
+                segments.append(final_segment)
+            self._stream_states.pop(key, None)
+
+        for segment in segments:
+            task = self._schedule_delivery(device_id, {**payload, "response_text": segment, "streaming_segment": True}, segment)
+            if task is not None:
+                state.tasks.append(task)
 
     async def _deliver_audio(
         self,

@@ -43,10 +43,12 @@ ES8311_I2C_ADDR = 0x18
 AUDIO_BUFFER_SIZE = 8192  # Bytes
 MAX_AUDIO_CACHE_SIZE = 256 * 1024  # 256KB max cache
 
-# Audio format
+# Audio format. ES8311 requires a ~1.4 MHz BCLK, so StickS3 captures
+# 44.1 kHz stereo and the gateway normalizes to mono for STT.
 SAMPLE_RATE = 44100
 CHANNELS = 2
 BITS_PER_SAMPLE = 16
+BYTES_PER_FRAME = CHANNELS * (BITS_PER_SAMPLE // 8)
 
 
 class AudioManager:
@@ -201,7 +203,7 @@ class AudioManager:
         duration_ms = utime.ticks_diff(utime.ticks_ms(), self._record_start_time)
         
         # Return recorded data
-        audio_data = bytes(self._record_buffer[:self._record_samples * 4])  # 2 channels * 2 bytes
+        audio_data = bytes(self._record_buffer[:self._record_samples * BYTES_PER_FRAME])
         
         print("Recording stopped: {} samples, {} ms".format(
             self._record_samples, duration_ms))
@@ -222,12 +224,13 @@ class AudioManager:
             return None
         
         try:
-            # Read from I2S
-            chunk = self._i2s.readinto(self._record_buffer)
-            if chunk:
-                # Update sample count
-                self._record_samples += len(chunk) // 4  # 2 channels * 2 bytes
-            return chunk
+            # Read from I2S. MicroPython I2S.readinto returns the number of
+            # bytes read; convert that slice to immutable bytes for DATP upload.
+            bytes_read = self._i2s.readinto(self._record_buffer)
+            if bytes_read:
+                self._record_samples += bytes_read // BYTES_PER_FRAME
+                return bytes(self._record_buffer[:bytes_read])
+            return None
         except Exception as e:
             print("Audio read error:", e)
             return None
