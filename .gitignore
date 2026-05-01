@@ -81,7 +81,8 @@ PI_GATEWAY_INTEGRATION_PLAN.md
 PUBLIC_RELEASE_READINESS_REPORT.md
 CLAUDE.md
 WORKLOG.md
-context.md
+**/context.md
+**/progress.md
 agent-backend-comparison.md
 agent-backend-implementation-plan.md
 hermes-integration-plan.md
