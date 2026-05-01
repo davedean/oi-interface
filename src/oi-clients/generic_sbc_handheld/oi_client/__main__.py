@@ -43,6 +43,7 @@ CONFIG_DIR = os.path.expanduser("~/.config/oi")
 LOG_PATH = os.path.join(_SCRIPT_DIR, "oi.log")
 DEFAULT_CONFIG = {
     "gateway_url": "ws://localhost:8788/datp",
+    "gateway_urls": [],
     "device_id": "sbc-handheld-001",
     "device_type": "sbc-handheld",
     "character_size": "big",
@@ -164,6 +165,7 @@ async def main():
         backend_id=config.get("backend_id"),
         agent_id=config.get("agent_id"),
         session_key=config.get("session_key"),
+        gateway_urls=config.get("gateway_urls") if isinstance(config.get("gateway_urls"), list) else None,
         settings_persist=lambda updates: save_config(config_path, updates),
         button_map=config.get("button_map") if isinstance(config.get("button_map"), dict) else None,
         button_profile_name=str(config.get("button_profile_name") or ""),

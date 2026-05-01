@@ -15,7 +15,7 @@ if str(client_src) not in sys.path:
     sys.path.insert(0, str(client_src))
 
 import oi_client.app as app_mod
-from oi_client.app import CardData, HandheldApp, UIMode
+from oi_client.app import CardData, HandheldApp, UIMode, _normalize_gateway_urls
 
 
 class StubInput:
@@ -167,6 +167,13 @@ class StubAudio:
 
     def stop(self):
         self.stopped = True
+
+
+def test_normalize_gateway_urls_dedupes_and_keeps_primary_first() -> None:
+    assert _normalize_gateway_urls("ws://primary/datp", ["ws://backup/datp", "ws://primary/datp", "", 1]) == [
+        "ws://primary/datp",
+        "ws://backup/datp",
+    ]
 
 
 @pytest.fixture
@@ -351,10 +358,14 @@ async def test_menu_device_settings_and_show_progress_toggle(app: HandheldApp) -
 @pytest.mark.asyncio
 async def test_settings_diagnostics_connection_and_system_menu(app: HandheldApp) -> None:
     app._online = True
+    app._gateway_urls = ["ws://gateway/datp", "ws://backup/datp"]
+    conversation_updates = []
     app.datp = SimpleNamespace(
+        gateway=app.gateway_url,
         reconnect=AsyncMock(return_value=True),
         send_conversation_update=AsyncMock(),
-        update_conversation=lambda **kwargs: None,
+        set_gateway=lambda gateway: setattr(app.datp, "gateway", gateway),
+        update_conversation=lambda **kwargs: conversation_updates.append(kwargs),
         server_info={
             "payload": {
                 "available_backends": [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}],
@@ -380,6 +391,21 @@ async def test_settings_diagnostics_connection_and_system_menu(app: HandheldApp)
     await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
     assert app._menu_mode == "connection"
 
+    app._menu_idx = app._menu_items().index("Gateway")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+    assert app.gateway_url == "ws://backup/datp"
+    assert app.datp.gateway == "ws://backup/datp"
+    assert conversation_updates[-1] == {
+        "backend_id": None,
+        "agent_id": None,
+        "session_key": "oi:device:dev1",
+    }
+    app.datp.reconnect.assert_awaited_once()
+    app.datp.send_conversation_update.assert_not_awaited()
+
+    app.datp.reconnect.reset_mock()
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "connection"
     app._menu_idx = app._menu_items().index("Backend")
     await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
     assert app._preferred_backend_id == "pi"
@@ -396,6 +422,123 @@ async def test_settings_diagnostics_connection_and_system_menu(app: HandheldApp)
     await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
     assert app._card.title == "Reboot"
     assert "blocked" in app._card.body
+
+
+def test_gateway_cycle_with_single_option_keeps_existing_connection_preferences(app: HandheldApp) -> None:
+    app._gateway_urls = ["ws://gateway/datp"]
+    app._preferred_backend_id = "codex"
+    app._preferred_agent_id = "build"
+    app._preferred_session_key = "oi:session:custom"
+
+    label = app._cycle_gateway()
+
+    assert label == "ws://gateway/datp"
+    assert app._preferred_backend_id == "codex"
+    assert app._preferred_agent_id == "build"
+    assert app._preferred_session_key == "oi:session:custom"
+
+
+@pytest.mark.asyncio
+async def test_gateway_switch_resets_stale_connection_preferences_before_reconnect(app: HandheldApp) -> None:
+    app._gateway_urls = ["ws://gateway/datp", "ws://backup/datp"]
+    app._preferred_backend_id = "codex"
+    app._preferred_agent_id = "build"
+    app._preferred_session_key = "oi:session:custom"
+    updates = []
+    app.datp = SimpleNamespace(
+        gateway=app.gateway_url,
+        reconnect=AsyncMock(return_value=False),
+        send_conversation_update=AsyncMock(),
+        set_gateway=lambda gateway: setattr(app.datp, "gateway", gateway),
+        update_conversation=lambda **kwargs: updates.append(kwargs),
+        server_info={"payload": {}},
+        is_connected=False,
+    )
+
+    label = app._cycle_gateway()
+    ok = await app._apply_connection_preferences(reconnect=True, allow_live_update=False)
+
+    assert label == "ws://backup/datp"
+    assert ok is False
+    assert updates[-1] == {
+        "backend_id": None,
+        "agent_id": None,
+        "session_key": "oi:device:dev1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_gateway_menu_rolls_back_failed_gateway_reconnect(app: HandheldApp) -> None:
+    writes = []
+    app._settings_persist = lambda payload: writes.append(payload)
+    app._gateway_urls = ["ws://gateway/datp", "ws://backup/datp"]
+    app._preferred_backend_id = "pi"
+    app._preferred_agent_id = "main"
+    app._preferred_session_key = "oi:session:keep"
+    updates = []
+    app.datp = SimpleNamespace(
+        gateway=app.gateway_url,
+        reconnect=AsyncMock(side_effect=[False, True]),
+        send_conversation_update=AsyncMock(),
+        set_gateway=lambda gateway: setattr(app.datp, "gateway", gateway),
+        update_conversation=lambda **kwargs: updates.append(kwargs),
+        server_info={"payload": {}},
+        is_connected=False,
+    )
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "connection"
+    app._menu_idx = app._menu_items().index("Gateway")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+
+    assert app.gateway_url == "ws://gateway/datp"
+    assert app.datp.gateway == "ws://gateway/datp"
+    assert app._preferred_backend_id == "pi"
+    assert app._preferred_agent_id == "main"
+    assert app._preferred_session_key == "oi:session:keep"
+    assert updates[-1] == {
+        "backend_id": "pi",
+        "agent_id": "main",
+        "session_key": "oi:session:keep",
+    }
+    assert app.datp.reconnect.await_count == 2
+    assert app._online is True
+    assert app._card.title == "Gateway"
+    assert writes[-1]["gateway_url"] == "ws://gateway/datp"
+
+
+@pytest.mark.asyncio
+async def test_connection_menu_surfaces_gateway_rejection_without_reconnect(app: HandheldApp) -> None:
+    writes = []
+    app._settings_persist = lambda payload: writes.append(payload)
+    app._online = True
+    app._preferred_backend_id = "pi"
+    updates = []
+    app.datp = SimpleNamespace(
+        gateway=app.gateway_url,
+        reconnect=AsyncMock(return_value=True),
+        send_conversation_update=AsyncMock(return_value={
+            "type": "error",
+            "payload": {"message": "bad backend"},
+        }),
+        set_gateway=lambda gateway: setattr(app.datp, "gateway", gateway),
+        update_conversation=lambda **kwargs: updates.append(kwargs),
+        server_info={"payload": {"available_backends": [{"id": "pi", "name": "Pi"}, {"id": "codex", "name": "Codex"}]}},
+        is_connected=True,
+    )
+
+    app._ui_mode = UIMode.MENU
+    app._menu_mode = "connection"
+    app._menu_idx = app._menu_items().index("Backend")
+    await app._handle_input(SimpleNamespace(type="button", name="a", action="pressed", raw=0))
+
+    assert app._preferred_backend_id == "pi"
+    assert updates[-1]["backend_id"] == "pi"
+    assert app._ui_mode == UIMode.ERROR
+    assert app._card.title == "Connection update failed"
+    assert app._card.body == "bad backend"
+    assert writes[-1]["backend_id"] == "pi"
+    app.datp.reconnect.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -525,6 +668,7 @@ async def test_settings_persist_callback_invoked(monkeypatch) -> None:
         "ws://gateway/datp",
         "dev1",
         "handheld",
+        gateway_urls=["ws://gateway/datp", "ws://backup/datp"],
         settings_persist=lambda payload: writes.append(payload),
     )
     app._ui_mode = UIMode.HOME
@@ -541,5 +685,7 @@ async def test_settings_persist_callback_invoked(monkeypatch) -> None:
     assert "volume" in latest
     assert "led_enabled" in latest
     assert "mute_duration_hours" in latest
+    assert latest["gateway_url"] == "ws://gateway/datp"
+    assert latest["gateway_urls"] == ["ws://gateway/datp", "ws://backup/datp"]
     assert latest["button_map"] == {"a": {"type": "button", "value": 0}}
     assert latest["button_profile_name"] == ""

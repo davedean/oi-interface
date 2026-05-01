@@ -167,6 +167,20 @@ def _coerce_int(value: object, default: int) -> int:
         return default
 
 
+def _normalize_gateway_urls(primary_gateway: str, gateway_urls: object) -> list[str]:
+    values: list[str] = []
+    if isinstance(gateway_urls, list):
+        values.extend(str(item).strip() for item in gateway_urls if isinstance(item, str) and str(item).strip())
+    primary = str(primary_gateway).strip()
+    if primary:
+        values.insert(0, primary)
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped or [primary_gateway]
+
+
 class HandheldApp:
     def __init__(
         self,
@@ -183,6 +197,7 @@ class HandheldApp:
         backend_id: str | None = None,
         agent_id: str | None = None,
         session_key: str | None = None,
+        gateway_urls: list[str] | None = None,
         settings_persist: Callable[[dict[str, object]], None] | None = None,
         button_map: dict[str, dict[str, object]] | None = None,
         button_profile_name: str | None = None,
@@ -243,7 +258,7 @@ class HandheldApp:
             "System",
             "Back",
         ]
-        self._menu_connection_items = ["Backend", "Agent", "Session", "Reconnect Now", "Back"]
+        self._menu_connection_items = ["Gateway", "Backend", "Agent", "Session", "Reconnect Now", "Back"]
         self._menu_system_items = ["Reboot", "Shutdown", "Back"]
 
         # Delight / easter eggs
@@ -268,6 +283,7 @@ class HandheldApp:
         self._character_size = size_value if size_value in {"big", "small"} else "big"
         self._settings_persist = settings_persist
         self._button_profile_name = button_profile_name or ""
+        self._gateway_urls = _normalize_gateway_urls(gateway_url, gateway_urls)
         self._preferred_backend_id = backend_id
         self._preferred_agent_id = agent_id
         self._preferred_session_key = session_key or f"oi:device:{device_id}"
@@ -658,6 +674,9 @@ class HandheldApp:
         items = payload.get("available_agents") if isinstance(payload, dict) else []
         return [item for item in items if isinstance(item, dict) and (item.get("id") or item.get("name"))]
 
+    def _current_gateway_label(self) -> str:
+        return self.gateway_url
+
     def _current_backend_label(self) -> str:
         current = self._preferred_backend_id
         for item in self._available_backends():
@@ -679,8 +698,9 @@ class HandheldApp:
             return "device"
         return value.replace("oi:session:", "session:")
 
-    async def _apply_connection_preferences(self, *, reconnect: bool = True) -> bool:
+    async def _apply_connection_preferences(self, *, reconnect: bool = True, allow_live_update: bool = True) -> bool:
         if self.datp:
+            self.datp.set_gateway(self.gateway_url)
             self.datp.update_conversation(
                 backend_id=self._preferred_backend_id,
                 agent_id=self._preferred_agent_id,
@@ -689,13 +709,20 @@ class HandheldApp:
         self._persist_settings()
         if reconnect and self.datp:
             self._ui_mode = UIMode.CONNECTING
-            if self.datp.is_connected:
+            if allow_live_update and self.datp.is_connected:
                 try:
-                    await self.datp.send_conversation_update(
+                    response = await self.datp.send_conversation_update(
                         backend_id=self._preferred_backend_id,
                         agent_id=self._preferred_agent_id,
                         session_key=self._preferred_session_key,
+                        await_reply=True,
                     )
+                    if isinstance(response, dict) and response.get("type") == "error":
+                        self._online = True
+                        self._ui_mode = UIMode.ERROR
+                        self._card.title = "Connection update failed"
+                        self._card.body = str((response.get("payload") or {}).get("message") or "Gateway rejected connection update")
+                        return False
                     self._sync_connection_preferences_from_server()
                     self._online = True
                     self._ui_mode = UIMode.READY
@@ -712,6 +739,21 @@ class HandheldApp:
                 self._card.body = "Connection updated"
             return ok
         return True
+
+    def _reset_connection_preferences_for_gateway(self) -> None:
+        self._preferred_backend_id = None
+        self._preferred_agent_id = None
+        self._preferred_session_key = f"oi:device:{self.device_id}"
+
+    def _cycle_gateway(self) -> str:
+        if self.gateway_url not in self._gateway_urls:
+            self._gateway_urls.append(self.gateway_url)
+        current_url = self.gateway_url
+        next_url = self._gateway_urls[(self._gateway_urls.index(self.gateway_url) + 1) % len(self._gateway_urls)]
+        self.gateway_url = next_url
+        if next_url != current_url:
+            self._reset_connection_preferences_for_gateway()
+        return self._current_gateway_label()
 
     def _cycle_backend(self) -> str:
         backends = self._available_backends()
@@ -761,6 +803,27 @@ class HandheldApp:
         if payload.get("selected_session_key"):
             self._preferred_session_key = str(payload["selected_session_key"])
 
+    def _restore_connection_state(
+        self,
+        *,
+        gateway_url: str,
+        backend_id: str | None,
+        agent_id: str | None,
+        session_key: str | None,
+    ) -> None:
+        self.gateway_url = gateway_url
+        self._preferred_backend_id = backend_id
+        self._preferred_agent_id = agent_id
+        self._preferred_session_key = session_key
+        if self.datp:
+            self.datp.set_gateway(gateway_url)
+            self.datp.update_conversation(
+                backend_id=backend_id,
+                agent_id=agent_id,
+                session_key=session_key,
+            )
+        self._persist_settings()
+
     def _show_card_message(self, title: str, body: str) -> None:
         self._card.title = title
         self._card.body = body
@@ -775,7 +838,7 @@ class HandheldApp:
         )
         lines = [
             f"online: {'yes' if self._online else 'no'}",
-            f"gateway: {self.gateway_url}",
+            f"gateway: {self._current_gateway_label()}",
             f"backend: {self._current_backend_label()}",
             f"agent: {self._current_agent_label()}",
             f"session: {self._current_session_label()}",
@@ -890,20 +953,75 @@ class HandheldApp:
                         self._sync_connection_preferences_from_server()
                     self._online = self.datp.is_connected
                     self._ui_mode = UIMode.READY if self._online else UIMode.ERROR
+            elif item == "Gateway":
+                previous = (self.gateway_url, self._preferred_backend_id, self._preferred_agent_id, self._preferred_session_key)
+                label = self._cycle_gateway()
+                if await self._apply_connection_preferences(reconnect=True, allow_live_update=False):
+                    self._show_card_message("Gateway", f"Set to {label}")
+                else:
+                    self._restore_connection_state(
+                        gateway_url=previous[0],
+                        backend_id=previous[1],
+                        agent_id=previous[2],
+                        session_key=previous[3],
+                    )
+                    if self.datp:
+                        self._ui_mode = UIMode.CONNECTING
+                        try:
+                            restored_ok = await self.datp.reconnect()
+                        except Exception as exc:
+                            self._online = False
+                            self._ui_mode = UIMode.ERROR
+                            self._card.title = "Gateway switch failed"
+                            self._card.body = str(exc)
+                            return
+                        if restored_ok:
+                            self._sync_connection_preferences_from_server()
+                            self._online = True
+                            self._show_card_message("Gateway", f"Stayed on {previous[0]}")
+                        else:
+                            self._online = False
+                            self._ui_mode = UIMode.ERROR
+                            self._card.title = "Gateway switch failed"
+                            self._card.body = f"Could not reach {label}; restored {previous[0]}" 
             elif item == "Backend":
+                previous = (self._preferred_backend_id, self._preferred_agent_id, self._preferred_session_key)
                 label = self._cycle_backend()
                 if await self._apply_connection_preferences(reconnect=True):
                     self._show_card_message("Backend", f"Set to {label}")
+                else:
+                    self._restore_connection_state(
+                        gateway_url=self.gateway_url,
+                        backend_id=previous[0],
+                        agent_id=previous[1],
+                        session_key=previous[2],
+                    )
             elif item == "Agent":
+                previous = (self._preferred_backend_id, self._preferred_agent_id, self._preferred_session_key)
                 label = self._cycle_agent()
                 if await self._apply_connection_preferences(reconnect=True):
                     self._show_card_message("Agent", f"Set to {label}")
+                else:
+                    self._restore_connection_state(
+                        gateway_url=self.gateway_url,
+                        backend_id=previous[0],
+                        agent_id=previous[1],
+                        session_key=previous[2],
+                    )
             elif item == "Session":
+                previous = (self._preferred_backend_id, self._preferred_agent_id, self._preferred_session_key)
                 label = self._cycle_session()
                 if await self._apply_connection_preferences(reconnect=True):
                     self._show_card_message("Session", f"Set to {label}")
+                else:
+                    self._restore_connection_state(
+                        gateway_url=self.gateway_url,
+                        backend_id=previous[0],
+                        agent_id=previous[1],
+                        session_key=previous[2],
+                    )
             elif item == "Reconnect Now":
-                await self._apply_connection_preferences(reconnect=True)
+                await self._apply_connection_preferences(reconnect=True, allow_live_update=False)
             elif item == "Reboot":
                 result = self._device_control.apply("device.reboot")
                 self._show_card_message("Reboot", result.message or ("ok" if result.ok else "reboot blocked"))
@@ -951,6 +1069,8 @@ class HandheldApp:
                 "volume": self._device_control.volume,
                 "led_enabled": self._device_control.led_enabled,
                 "mute_duration_hours": self._mute_duration_hours,
+                "gateway_url": self.gateway_url,
+                "gateway_urls": list(self._gateway_urls),
                 "backend_id": self._preferred_backend_id,
                 "agent_id": self._preferred_agent_id,
                 "session_key": self._preferred_session_key,
@@ -1279,6 +1399,8 @@ class HandheldApp:
                     lines.append(f"{marker}{item}: {'on' if self._show_progress_messages else 'off'}")
                 elif item == "Show Celebrations":
                     lines.append(f"{marker}{item}: {'on' if self._show_celebrations else 'off'}")
+                elif item == "Gateway":
+                    lines.append(f"{marker}{item}: {self._current_gateway_label()}")
                 elif item == "Backend":
                     lines.append(f"{marker}{item}: {self._current_backend_label()}")
                 elif item == "Agent":

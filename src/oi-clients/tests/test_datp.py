@@ -161,6 +161,42 @@ async def test_send_conversation_update_emits_event_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_conversation_update_can_wait_for_gateway_reply() -> None:
+    client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
+    ws = FakeWebSocket()
+    client._ws = ws
+
+    task = asyncio.create_task(client.send_conversation_update(backend_id="codex", await_reply=True))
+    await asyncio.sleep(0)
+    await client._handle_message({
+        "type": "hello_ack",
+        "payload": {"session_id": "sess-2", "selected_backend": "codex", "selected_session_key": "oi:device:dev1"},
+    })
+    response = await task
+
+    assert response["type"] == "hello_ack"
+    assert client.server_info["payload"]["selected_backend"] == "codex"
+
+
+@pytest.mark.asyncio
+async def test_send_conversation_update_returns_gateway_error_reply() -> None:
+    client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
+    ws = FakeWebSocket()
+    client._ws = ws
+
+    task = asyncio.create_task(client.send_conversation_update(backend_id="bad", await_reply=True))
+    await asyncio.sleep(0)
+    await client._handle_message({
+        "type": "error",
+        "payload": {"code": "INVALID_CONVERSATION", "message": "bad backend"},
+    })
+    response = await task
+
+    assert response["type"] == "error"
+    assert response["payload"]["message"] == "bad backend"
+
+
+@pytest.mark.asyncio
 async def test_send_audio_chunk_encodes_pcm_as_base64() -> None:
     client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
     ws = FakeWebSocket()
@@ -192,6 +228,14 @@ async def test_send_failure_marks_client_disconnected() -> None:
     assert client.is_connected is False
 
 
+def test_set_gateway_updates_connection_target() -> None:
+    client = DatpClient("ws://gateway/datp", "dev1", "handheld", {})
+
+    client.set_gateway("ws://backup/datp")
+
+    assert client.gateway == "ws://backup/datp"
+
+
 @pytest.mark.asyncio
 async def test_reconnect_resets_session_commands_and_state(monkeypatch) -> None:
     client = DatpClient("ws://gateway/datp", "dev1", "handheld", {}, reconnect_backoff=0)
@@ -205,11 +249,13 @@ async def test_reconnect_resets_session_commands_and_state(monkeypatch) -> None:
     monkeypatch.setattr(client, "connect", connect)
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
+    client.set_gateway("ws://backup/datp")
     result = await client.reconnect()
 
     assert result is True
     disconnect.assert_awaited_once()
     connect.assert_awaited_once()
+    assert client.gateway == "ws://backup/datp"
     assert client._session_id is None
     assert client._received_commands == []
     assert client.state == State.READY

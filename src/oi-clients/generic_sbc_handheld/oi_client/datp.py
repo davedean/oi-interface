@@ -59,6 +59,7 @@ class DatpClient:
         self._server_info: dict[str, Any] | None = None
         self._listen_task: asyncio.Task | None = None
         self._received_commands: list[dict] = []
+        self._conversation_update_waiter: asyncio.Future[dict[str, Any]] | None = None
 
         # Command queue for the UI thread
         self._cmd_queue: asyncio.Queue[dict] = asyncio.Queue()
@@ -93,6 +94,9 @@ class DatpClient:
         self._backend_id = backend_id
         self._agent_id = agent_id
         self._preferred_session_key = session_key
+
+    def set_gateway(self, gateway: str) -> None:
+        self.gateway = gateway
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -169,6 +173,7 @@ class DatpClient:
         self._session_id = None
         self._server_info = None
         self._received_commands.clear()
+        self._conversation_update_waiter = None
         self._state_machine = StateMachine(State.READY)
         await asyncio.sleep(self.reconnect_backoff)
         return await self.connect()
@@ -205,6 +210,8 @@ class DatpClient:
                 self._agent_id = str(selected_agent.get("id") or selected_agent.get("name"))
             if payload.get("selected_session_key") is not None:
                 self._preferred_session_key = payload.get("selected_session_key")
+            if self._conversation_update_waiter and not self._conversation_update_waiter.done():
+                self._conversation_update_waiter.set_result(msg)
 
         elif msg_type == "command":
             op = payload.get("op", "")
@@ -223,6 +230,8 @@ class DatpClient:
         elif msg_type == "error":
             code = payload.get("code", "")
             print(f"Gateway error: {code}")
+            if self._conversation_update_waiter and not self._conversation_update_waiter.done():
+                self._conversation_update_waiter.set_result(msg)
             try:
                 self._state_machine.transition(State.ERROR)
             except InvalidTransition:
@@ -283,16 +292,29 @@ class DatpClient:
         backend_id: str | None = None,
         agent_id: str | None = None,
         session_key: str | None = None,
-    ) -> None:
+        await_reply: bool = False,
+        timeout_seconds: float = 5.0,
+    ) -> dict[str, Any] | None:
         self.update_conversation(
             backend_id=backend_id if backend_id is not None else self._backend_id,
             agent_id=agent_id if agent_id is not None else self._agent_id,
             session_key=session_key if session_key is not None else self._preferred_session_key,
         )
+        waiter: asyncio.Future[dict[str, Any]] | None = None
+        if await_reply:
+            waiter = asyncio.get_running_loop().create_future()
+            self._conversation_update_waiter = waiter
         await self._send("event", {
             "event": "conversation.update",
             "conversation": {k: v for k, v in self.conversation.items() if v is not None},
         })
+        if waiter is None:
+            return None
+        try:
+            return await asyncio.wait_for(waiter, timeout=timeout_seconds)
+        finally:
+            if self._conversation_update_waiter is waiter:
+                self._conversation_update_waiter = None
 
     async def send_state_report(self, **extra_fields: Any) -> None:
         payload: dict[str, Any] = {

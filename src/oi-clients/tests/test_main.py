@@ -46,9 +46,16 @@ def test_config_int_falls_back_on_bad_values() -> None:
 @patch("oi_client.__main__.load_config", return_value=(main_mod.DEFAULT_CONFIG, "/tmp/config.json"))
 async def test_main_runs_and_shuts_down_app(mock_load_config, mock_setup_logging, monkeypatch) -> None:
     app = type("App", (), {"run": AsyncMock(), "shutdown": AsyncMock()})()
-    monkeypatch.setitem(sys.modules, "oi_client.app", type("M", (), {"HandheldApp": lambda **kwargs: app}))
+    captured: dict[str, object] = {}
+
+    def make_app(**kwargs):
+        captured.update(kwargs)
+        return app
+
+    monkeypatch.setitem(sys.modules, "oi_client.app", type("M", (), {"HandheldApp": make_app}))
 
     await main_mod.main()
 
+    assert captured["gateway_urls"] == []
     app.run.assert_awaited_once()
     app.shutdown.assert_awaited_once()

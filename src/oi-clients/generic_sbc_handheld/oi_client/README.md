@@ -59,6 +59,8 @@ python3 -m oi_client
 ```
 
 `config.json` supports:
+- `gateway_url`: active gateway WebSocket URL
+- `gateway_urls`: optional list of gateway WebSocket URLs to cycle from the Connection menu
 - `character_size`: `big` or `small`
 - `show_progress_messages`: `true` or `false`
 - `show_celebrations`: `true` or `false`
@@ -111,7 +113,7 @@ The client now also sends periodic DATP `state` reports with any discoverable ba
 
 - `Surprise me ✨` home prompt that cycles through whimsical requests
 - `About Gateway` menu card showing `hello_ack` metadata like server name/session/agents
-- Settings menu now includes brightness, volume, LED, mute duration, a Connection submenu (backend / agent / session), diagnostics, and a small system submenu
+- Settings menu now includes brightness, volume, LED, mute duration, a Connection submenu (gateway / backend / agent / session), diagnostics, and a small system submenu
 - secret button-code easter egg for Blob Party mode
 - playful connecting/waiting/response quips on-device
 
