@@ -22,10 +22,10 @@ class ButtonMappingStep:
 
 
 BUTTON_MAPPING_STEPS: tuple[ButtonMappingStep, ...] = (
-    ButtonMappingStep("a", "Press the RIGHT face button"),
-    ButtonMappingStep("b", "Press the BOTTOM face button"),
-    ButtonMappingStep("x", "Press the TOP face button"),
-    ButtonMappingStep("y", "Press the LEFT face button"),
+    ButtonMappingStep("a", "Press the RIGHT face button (usually A / east)"),
+    ButtonMappingStep("b", "Press the BOTTOM face button (usually B / south)"),
+    ButtonMappingStep("x", "Press the TOP face button (usually X / north)"),
+    ButtonMappingStep("y", "Press the LEFT face button (usually Y / west)"),
     ButtonMappingStep("up", "Press DPAD UP"),
     ButtonMappingStep("down", "Press DPAD DOWN"),
     ButtonMappingStep("left", "Press DPAD LEFT"),
@@ -141,6 +141,7 @@ async def run_button_mapping_wizard(renderer, input_device, seed_map: dict[str, 
             "",
             step.prompt,
             "",
+            "Face buttons are the 4 front buttons, not the D-pad.",
             "Press the requested control now.",
             f"Timeout: {seconds_left}s (keeps current/default mapping)",
             "",
